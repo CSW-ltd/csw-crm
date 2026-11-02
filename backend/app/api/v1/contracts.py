@@ -44,8 +44,9 @@ async def create(body: svc.ContractDraftIn, user: User = Legal, db: AsyncSession
 
 # --- mavjud (qo'lda tuzilgan) shartnomalarni kiritish ---
 @router.post("/existing", status_code=201)
-async def create_existing(body: imp.ExistingIn, user: User = Legal, db: AsyncSession = DB) -> dict:
-    return svc.out(await imp.create_one(db, user, body), with_events=True)
+async def create_existing(body: svc.ContractDraftIn, user: User = Legal, db: AsyncSession = DB, storage: Storage = Depends(get_storage)) -> dict:
+    """Mavjud shartnoma: to'liq ma'lumot (rekvizitlar, shartlar + raqam, imzolangan sana, platforma ID) → buxgalter tasdig'iga."""
+    return svc.out(await svc.create_existing(db, storage, user, body), with_events=True)
 
 
 @router.get("/existing/template")

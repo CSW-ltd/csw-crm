@@ -196,5 +196,6 @@ async def test_print_confirm_requires_agent_when_manual_mode_off(world, client_f
     await gps.post(f"/api/v1/order-forms/{fid}/print")
     r = await gps.post(f"/api/v1/order-forms/{fid}/confirm-print")
     assert r.status_code == 403
-    # Qayta biriktirish urinishi — o'sha murojaat (printing) yangi varaqa yaratmaydi
-    assert (await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v1"]})).status_code == 409
+    # Qayta biriktirish (printing) — o'sha varaqa raqami saqlanadi, yangi varaqa yaratilmaydi
+    r = await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v1"]})
+    assert r.status_code == 200 and r.json()["order_form"]["id"] == fid

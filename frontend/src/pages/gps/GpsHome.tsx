@@ -107,14 +107,15 @@ export function GpsHome() {
           {shown.map((r) => (
             <Box key={r.id} onClick={() => markSeen([r.id])}>
               <RedCard r={r} now={now} isNew={isNew(r)}>
-                {r.status === "printing" && r.order_form
-                  ? <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} data-awaiting-print>
-                    <Chip icon={<PrintIcon sx={{ color: "#fff !important" }} />} label={t("of_awaiting_print", { n: r.order_form.number, plate: r.vehicle?.plate ?? "" })}
-                      sx={{ bgcolor: "rgba(0,0,0,.3)", color: "#fff", fontWeight: 600 }} />
-                    <Button variant="contained" disableElevation startIcon={<PrintIcon />} onClick={(e) => { e.stopPropagation(); setPaper(r.order_form!.id); }}
-                      sx={{ bgcolor: "#fff", color: "#8b0f0f", fontWeight: 700, "&:hover": { bgcolor: "#ffe3e3" } }}>{t("of_open_print")}</Button>
-                  </Stack>
-                  : <AssignBar r={r} onDone={onAssigned} onError={(e) => toast(tErr(errorCode(e), errorMessage(e)), "error")} />}
+                {r.status === "printing" && r.order_form && <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }}
+                  data-awaiting-print sx={{ mb: 1 }}>
+                  <Chip icon={<PrintIcon sx={{ color: "#fff !important" }} />} label={t("of_awaiting_print", { n: r.order_form.number, plate: r.vehicle?.plate ?? "" })}
+                    sx={{ bgcolor: "rgba(0,0,0,.3)", color: "#fff", fontWeight: 600 }} />
+                  <Button variant="contained" disableElevation startIcon={<PrintIcon />} onClick={(e) => { e.stopPropagation(); setPaper(r.order_form!.id); }}
+                    sx={{ bgcolor: "#fff", color: "#8b0f0f", fontWeight: 700, "&:hover": { bgcolor: "#ffe3e3" } }}>{t("of_open_print")}</Button>
+                </Stack>}
+                {/* Varaqa printerdan chiqqani tasdiqlanmaguncha boshqa mashinaga qayta biriktirish mumkin (raqam o'zgarmaydi) */}
+                <AssignBar r={r} onDone={onAssigned} onError={(e) => toast(tErr(errorCode(e), errorMessage(e)), "error")} />
               </RedCard>
             </Box>
           ))}
@@ -179,7 +180,7 @@ function AssignBar({ r, onDone, onError }: { r: DriverTask; onDone: (res: Driver
       <Button data-assign variant="contained" disableElevation disabled={!pick || busy || !online} onClick={assign}
         sx={{ bgcolor: "#fff", color: "#8b0f0f", fontWeight: 700, border: "2px solid #fff", "&:hover": { bgcolor: "#ffe3e3" },
           "&.Mui-disabled": { bgcolor: "rgba(0,0,0,.22)", color: "rgba(255,255,255,.75)", borderColor: "rgba(255,255,255,.35)" } }}>
-        {busy ? <CircularProgress size={18} color="inherit" /> : t("gps_assign_vehicle")}
+        {busy ? <CircularProgress size={18} color="inherit" /> : t(r.status === "printing" ? "gps_reassign" : "gps_assign_vehicle")}
       </Button>
       <Box sx={{ ml: { sm: "auto" }, "& .MuiButton-root": { color: "#fff", borderColor: "rgba(255,255,255,.6)" } }}>
       </Box>

@@ -88,6 +88,7 @@ async def paper(db: AsyncSession, user: User, form_id: int) -> dict:
             "waste_type": req.waste_type.value,
             # printerdan chiqqani tasdiqlanmagan: qizil kartada; manual_confirm — tumanda agentsiz rejim
             "awaiting_print": req.status == RequestStatus.printing,
+            "needs_reprint": needs_reprint(form, req),
             "manual_confirm": bool((d := await db.get(District, req.district_id)) and d.print_manual_confirm)}
 
 
@@ -120,6 +121,9 @@ async def print_pdf(db: AsyncSession, user: User, form_id: int) -> tuple[bytes, 
     data = await paper(db, user, form_id)
     pdf = await run_in_threadpool(render, data, code)
     events.record(db, req, user.id, f"buyurtma varaqasi {form.number} chop etildi" + (f" (qayta, {form.print_count}-marta)" if reprint else ""))
+    situation.activity(db, "act_form_printed", f"Varaqa chop etildi: {form.number} ({req.number}), {form.print_count}-marta",
+                       params={"form": form.number, "number": req.number, "count": form.print_count}, district_id=req.district_id,
+                       actor_id=user.id, ref=("request", req.id))
     await db.commit()
     return pdf, form.number
 
@@ -218,6 +222,9 @@ async def close(db: AsyncSession, user: User, form_id: int, volume_m3: Decimal, 
     form.closed_at, form.closed_by_id, form.closed_via = now, user.id, "form"
     req.status, req.finished_at = RequestStatus.done, now
     events.record(db, req, user.id, f"buyurtma varaqasi {form.number} bo'yicha yopildi: {volume_m3} m³")
+    situation.activity(db, "act_form_closed", f"Murojaat varaqa bilan yopildi: {req.number}, varaqa {form.number}, {volume_m3} m³",
+                       params={"number": req.number, "form": form.number, "volume": float(volume_m3)}, district_id=req.district_id,
+                       actor_id=user.id, ref=("request", req.id))
     await db.commit()
     await events.broadcast(req)
     return await req_repo.by_id(db, req.id)
@@ -229,14 +236,19 @@ def close_by_act(form: OrderForm | None, driver_id: int, volume_m3: Decimal) -> 
         form.closed_at, form.closed_by_id, form.closed_via, form.volume_m3 = utcnow(), driver_id, "act", volume_m3
 
 
+def needs_reprint(form: OrderForm, req: Request) -> bool:
+    """Qayta biriktirilgan (printing): qog'ozda eski mashina — yangi biriktirishdan keyin chop etilmagan."""
+    return bool(req.status == RequestStatus.printing and form.printed_at and req.assigned_at and form.printed_at < req.assigned_at)
+
+
 async def confirm_printed(db: AsyncSession, user: User, form_id: int, via: str) -> Request:
     """Varaqa printerdan chiqdi: murojaat qizildan sariqqa (biriktirilgan) o'tadi, haydovchiga vazifa ko'rinadi.
     via="agent" — printer agenti (PR #20), via="manual" — faqat tumanda agentsiz rejim yoqilgan bo'lsa."""
     form, req = await _form(db, user, form_id, lock=True)
     if req.status != RequestStatus.printing:
         raise conflict("not_printing", "Murojaat varaqa chop etilishini kutmayapti")
-    if not form.print_count:
-        raise conflict("not_printed", "Varaqa hali chop etilmagan")
+    if not form.print_count or needs_reprint(form, req):
+        raise conflict("not_printed", "Varaqa hali chop etilmagan (qayta biriktirilgandan keyin yangi mashina bilan chop eting)")
     if via == "manual":
         d = await db.get(District, req.district_id)
         if not d or not d.print_manual_confirm:
@@ -244,6 +256,9 @@ async def confirm_printed(db: AsyncSession, user: User, form_id: int, via: str) 
     form.print_confirmed_at, form.print_confirmed_by_id, form.print_confirm_via = utcnow(), user.id, via
     req.status = RequestStatus.assigned
     events.record(db, req, user.id, f"varaqa {form.number} printerdan chiqdi ({'agent' if via == 'agent' else 'qo‘lda tasdiq'})")
+    situation.activity(db, "act_print_confirmed", f"Varaqa printerdan chiqdi: {form.number} ({req.number}) — {'printer agenti' if via == 'agent' else 'qo‘lda tasdiq'}",
+                       params={"form": form.number, "number": req.number, "via": via}, district_id=req.district_id, actor_id=user.id,
+                       ref=("request", req.id))
     await db.commit()
     await events.broadcast(req)
     return await req_repo.by_id(db, req.id)

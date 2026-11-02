@@ -27,6 +27,17 @@ def add(db: AsyncSession, level: SituationLevel, kind: str, message: str, *, par
     return ev
 
 
+def activity(db: AsyncSession, kind: str, message: str, *, params: dict | None = None, district_id: int | None = None,
+             actor_id: int | None = None, ref: tuple[str, int] | None = None) -> SituationEvent:
+    """Faoliyat jurnali: tuman xodimlari bajargan har bir amal. Jonli yuborilmaydi, o'qilmaganlar soniga kirmaydi.
+    Biznes amali bilan bitta tranzaksiyada (chaqiruvchi commit qiladi)."""
+    ev = SituationEvent(level=SituationLevel.activity, kind=kind, message=message[:500],
+                        params=json.dumps(params, ensure_ascii=False, default=str) if params else None,
+                        district_id=district_id, actor_id=actor_id, ref_type=ref[0] if ref else None, ref_id=ref[1] if ref else None)
+    db.add(ev)
+    return ev
+
+
 def payload(ev: SituationEvent) -> dict:
     return {"id": ev.id, "level": ev.level.value, "kind": ev.kind, "message": ev.message,
             "params": json.loads(ev.params) if ev.params else {}, "district_id": ev.district_id, "actor_id": ev.actor_id,

@@ -86,6 +86,7 @@ OPEN_STATUSES = ("new", "printing", "assigned", "enroute", "onsite", "failed")
 
 
 class SituationLevel(str, Enum):
+    activity = "activity"  # xodimlar faoliyati jurnali — qo'ng'iroqcha va popupga tushmaydi
     info = "info"
     warning = "warning"
     error = "error"

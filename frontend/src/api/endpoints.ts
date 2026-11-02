@@ -1,7 +1,7 @@
 import { api } from "./client";
 import { clearTokens, saveTokens, type Tokens } from "@/lib/session";
 import { closeSocket } from "@/lib/socket";
-import type { ContractCheck, ContractDraft, ContractItem, ExistingContract, ExistingImportResult, TariffOverview, InvoiceItem, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
+import type { ContractCheck, ContractDraft, ContractItem, ExistingImportResult, TariffOverview, InvoiceItem, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
   ImportBatch, ImportResult, LocationStatus, Region, Role, SituationEvent, SituationLevel, User } from "@/types";
 
 export const gpsApi = {
@@ -110,6 +110,8 @@ export const situationApi = {
     api.get<{ items: SituationEvent[]; total: number; unread: number; last_read_id: number }>("/situation", { params }).then((r) => r.data),
   unread: () => api.get<{ unread: number }>("/situation/unread").then((r) => r.data),
   markRead: (up_to_id?: number) => api.post<{ unread: number; last_read_id: number }>("/situation/read", { up_to_id }).then((r) => r.data),
+  exportFile: (params: { kind?: string; level?: string; district_id?: number; date_from?: string; date_to?: string }) =>
+    api.get<Blob>("/situation/export", { params, responseType: "blob", timeout: 120_000 }).then((r) => r.data),
 };
 
 export type OrderFields = { waste_type: WasteType; volume_estimate?: number | null; preferred_time?: string | null; note?: string | null;
@@ -226,7 +228,7 @@ export const contractsApi = {
   create: (body: ContractDraft) => api.post<ContractItem>("/contracts", body).then((r) => r.data),
   start: (customer_id: number) => api.post<ContractItem>("/contracts/start", { customer_id }).then((r) => r.data),
   saveDraft: (id: number, body: ContractDraft) => api.put<ContractItem>(`/contracts/${id}/draft`, body).then((r) => r.data),
-  createExisting: (body: ExistingContract) => api.post<ContractItem>("/contracts/existing", body).then((r) => r.data),
+  createExisting: (body: ContractDraft) => api.post<ContractItem>("/contracts/existing", body).then((r) => r.data),
   existingTemplate: () => api.get<Blob>("/contracts/existing/template", { responseType: "blob" }).then((r) => r.data),
   importExisting: (file: File, dry_run: boolean) => {
     const fd = new FormData();

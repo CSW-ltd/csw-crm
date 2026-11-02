@@ -11,7 +11,7 @@ MODULES: dict[str, list[str]] = {
     "customers": ["view", "create", "edit", "contract", "location_confirm", "import"],
     "staff": ["view", "create", "edit", "deactivate", "reset_password", "permissions"],
     "vehicles": ["view", "create", "edit", "deactivate"],
-    "settings": ["view", "radius_edit"],
+    "settings": ["view", "radius_edit", "tariff"],  # tariff — o'z tumanlari ta'rifini belgilash (manager; admin yopadi/ochadi)
     "requests": ["view", "create", "cancel"],
     "appeals": ["view", "create", "review"],
     "stats": ["view"],
@@ -23,7 +23,7 @@ ALL_CODES: frozenset[str] = frozenset(f"{m}.{a}" for m, actions in MODULES.items
 # Hozirgi xatti-harakatni saqlaydigan andozalar (migratsiya mavjud xodimlarni shu bilan to'ldiradi)
 ROLE_TEMPLATES: dict[Role, list[str]] = {
     Role.admin: [],
-    Role.manager: ["customers.view", "customers.location_confirm", "staff.view", "vehicles.view", "settings.view",
+    Role.manager: ["customers.view", "customers.location_confirm", "staff.view", "vehicles.view", "settings.view", "settings.tariff",
                    "requests.view", "stats.view", "orders.view", "orders.unlock", "accounting.view"],
     Role.legal: ["customers.view", "customers.create", "customers.edit", "customers.contract", "appeals.view", "appeals.review",
                  "requests.view", "orders.view", "orders.close", "accounting.view"],

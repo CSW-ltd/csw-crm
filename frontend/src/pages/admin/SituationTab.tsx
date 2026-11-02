@@ -15,6 +15,15 @@ import { clearSessionAlerts, onSessionAlert, sessionAlerts, toast } from "@/lib/
 import { formatDateTime } from "@/lib/format";
 import type { SituationEvent, SituationLevel } from "@/types";
 import { districtLabel, type RefData } from "./AdminHome";
+import { saveBlob } from "./ContractWizard";
+import DownloadIcon from "@mui/icons-material/Download";
+import HistoryIcon from "@mui/icons-material/History";
+
+/** Tuman xodimlari faoliyati jurnali (backend: situation.activity) */
+export const ACTIVITY_KINDS = ["act_request_created", "act_request_cancelled", "act_assigned", "act_reassigned", "act_form_printed",
+  "act_print_confirmed", "act_form_closed", "act_act_completed", "act_contract_started", "act_contract_saved", "act_contract_signed",
+  "act_contract_imported", "act_contract_import", "act_contract_approved", "act_contract_returned", "act_tariff_set", "act_tariff_lock",
+  "act_payment", "act_payment_cancelled", "act_payment_import", "act_invoices_generated", "act_invoices_sent"] as const;
 
 export const SITUATION_KINDS = ["account_locked", "act_suspect", "request_failed", "location_pending", "import_done", "user_created",
   "user_deactivated", "user_activated", "password_reset", "district_deactivated", "district_activated", "vehicle_deactivated",
@@ -22,7 +31,7 @@ export const SITUATION_KINDS = ["account_locked", "act_suspect", "request_failed
   "vehicle_created", "vehicle_updated", "customer_created", "customer_updated", "district_radius_changed", "request_overdue", "order_locked", "order_reprint"] as const;
 
 const LEVEL_ICON = {
-  info: <InfoIcon color="info" fontSize="small" />, warning: <WarningIcon color="warning" fontSize="small" />,
+  info: <InfoIcon color="info" fontSize="small" />, activity: <HistoryIcon color="action" fontSize="small" />, warning: <WarningIcon color="warning" fontSize="small" />,
   error: <ErrorIcon color="error" fontSize="small" />, success: <CheckIcon color="success" fontSize="small" />,
 };
 
@@ -80,6 +89,16 @@ export function SituationTab({ districts }: RefData) {
     catch (e) { toast(tErr(errorCode(e), errorMessage(e)), "error"); }
   };
   const reset = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setPage(0); };
+  // Jurnal: tur tanlangan — shu tur PDF; aks holda ZIP (har tur alohida PDF). Filtrlar (daraja, tuman, sana) qo'llanadi.
+  const [exporting, setExporting] = useState(false);
+  const doExport = async () => {
+    setExporting(true);
+    try {
+      const blob = await situationApi.exportFile({ kind: kind || undefined, level: level || undefined, district_id: district || undefined,
+        date_from: from || undefined, date_to: to || undefined });
+      saveBlob(blob, kind ? `vaziyat_${kind}.pdf` : "vaziyat_jurnal.zip");
+    } catch (e) { toast(tErr(errorCode(e), errorMessage(e)), "error"); } finally { setExporting(false); }
+  };
 
   return (
     <Stack spacing={2}>
@@ -88,12 +107,12 @@ export function SituationTab({ districts }: RefData) {
           <TextField id="s-level" size="small" select label={t("sit_level")} value={level} sx={{ minWidth: 150 }}
             onChange={(e) => reset(setLevel)(e.target.value as SituationLevel | "")}>
             <MenuItem value="">{t("all")}</MenuItem>
-            {(["error", "warning", "info"] as const).map((l) => <MenuItem key={l} value={l}>{t(`lvl_${l}`)}</MenuItem>)}
+            {(["error", "warning", "info", "activity"] as const).map((l) => <MenuItem key={l} value={l}>{t(`lvl_${l}`)}</MenuItem>)}
           </TextField>
           <TextField id="s-kind" size="small" select label={t("sit_kind")} value={kind} sx={{ minWidth: 220 }}
             onChange={(e) => reset(setKind)(e.target.value)}>
             <MenuItem value="">{t("all")}</MenuItem>
-            {SITUATION_KINDS.map((k) => <MenuItem key={k} value={k}>{t(`k_${k}` as MessageKey)}</MenuItem>)}
+            {[...ACTIVITY_KINDS, ...SITUATION_KINDS].map((k) => <MenuItem key={k} value={k}>{t(`k_${k}` as MessageKey)}</MenuItem>)}
           </TextField>
           <TextField id="s-district" size="small" select label={t("district")} value={district} sx={{ minWidth: 180 }}
             onChange={(e) => reset(setDistrict)(e.target.value === "" ? "" : Number(e.target.value))}>
@@ -106,6 +125,8 @@ export function SituationTab({ districts }: RefData) {
             onChange={(e) => reset(setTo)(e.target.value)} />
           <FormControlLabel control={<Switch id="s-unread" checked={onlyUnread} onChange={(e) => reset(setOnlyUnread)(e.target.checked)} />}
             label={t("only_unread")} />
+          <Button id="s-export" variant="contained" disableElevation startIcon={<DownloadIcon />} sx={{ whiteSpace: "nowrap" }} disabled={exporting}
+            onClick={doExport}>{t(kind ? "sit_export_pdf" : "sit_export_zip")}</Button>
           <Button variant="outlined" sx={{ ml: { md: "auto" }, whiteSpace: "nowrap" }} disabled={!ctx?.unread} onClick={markAll}>
             {t("mark_all_read")}{ctx?.unread ? ` (${ctx.unread})` : ""}
           </Button>
@@ -119,7 +140,7 @@ export function SituationTab({ districts }: RefData) {
             </TableRow></TableHead>
             <TableBody>
               {items.map((ev) => {
-                const isNew = ev.id > lastRead;
+                const isNew = ev.id > lastRead && ev.level !== "activity";
                 return (
                   <TableRow key={ev.id} data-unread={isNew || undefined}
                     sx={{ bgcolor: isNew ? "action.hover" : undefined, "& td:first-of-type": { borderLeft: 3, borderLeftColor: isNew ? `${ev.level}.main` : "transparent" } }}>

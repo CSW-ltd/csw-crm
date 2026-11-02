@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.core.errors import conflict, invalid, not_found
 from app.db.base import utcnow
 from app.models import Customer, Payment, User
-from app.services import access
+from app.services import access, situation
 
 
 def out(p: Payment) -> dict:
@@ -36,6 +36,10 @@ async def create(db: AsyncSession, actor: User, customer_id: int, paid_on: date,
     p = Payment(customer_id=customer_id, paid_on=paid_on, amount=amount, doc_no=(doc_no or "").strip() or None,
                 note=(note or "").strip() or None, source="manual", created_by_id=actor.id)
     db.add(p)
+    cust = await db.get(Customer, customer_id)
+    situation.activity(db, "act_payment", f"To'lov kiritildi: «{cust.name}» {amount} so'm ({paid_on})",
+                       params={"customer": cust.name, "amount": float(amount), "paid_on": str(paid_on), "doc": doc_no},
+                       district_id=cust.district_id, actor_id=actor.id, ref=("customer", cust.id))
     await db.commit()
     return await by_id(db, p.id)
 
@@ -53,6 +57,9 @@ async def cancel(db: AsyncSession, actor: User, pid: int, reason: str) -> Paymen
     if p.cancelled_at:
         raise conflict("payment_cancelled", "To'lov allaqachon bekor qilingan")
     p.cancelled_at, p.cancelled_by_id, p.cancel_reason = utcnow(), actor.id, reason.strip()
+    situation.activity(db, "act_payment_cancelled", f"To'lov bekor qilindi: «{p.customer.name}» {p.amount} so'm — {p.cancel_reason}",
+                       params={"customer": p.customer.name, "amount": float(p.amount), "reason": p.cancel_reason},
+                       district_id=p.customer.district_id, actor_id=actor.id, ref=("customer", p.customer_id))
     await db.commit()
     return await by_id(db, pid)
 
@@ -152,5 +159,7 @@ async def import_file(db: AsyncSession, actor: User, file_name: str, content: by
         for r in rows:
             db.add(Payment(customer_id=r["customer_id"], paid_on=r["paid_on"], amount=Decimal(str(r["amount"])), doc_no=r["doc_no"],
                            source="import", note=f"import: {file_name}"[:255], created_by_id=actor.id))
+        situation.activity(db, "act_payment_import", f"Bank ko'chirmasidan to'lovlar: {len(rows)} ta, {sum(r['amount'] for r in rows)} so'm ({file_name})",
+                           params={"count": len(rows), "total": sum(r["amount"] for r in rows), "file": file_name}, actor_id=actor.id)
         await db.commit()
     return {"dry_run": dry_run, "ok": len(rows), "errors": errors, "rows": rows[:200], "total": sum(r["amount"] for r in rows)}

@@ -156,4 +156,4 @@ async def test_draft_delete_and_scope(world, client_factory):
     assert ct["number"].startswith("BTK-")
     dx = await legal.get(f"/api/v1/contracts/{ct['id']}/document", params={"format": "docx"})
     text = "\n".join(p.text for p in Document(io.BytesIO(dx.content)).paragraphs)
-    assert "Шартнома №" in text and "Sakkiz million" in text
+    assert "Шартнома №" in text and "Sakkiz million" in text and "11.5." in text and "mulk huquqi asosida tegishli" in text

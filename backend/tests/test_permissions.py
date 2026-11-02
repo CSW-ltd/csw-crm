@@ -35,7 +35,7 @@ async def test_me_has_permissions_and_scope(world, client_factory):
     me = (await admin.get("/api/v1/auth/me")).json()
     assert "staff.permissions" in me["permissions"] and me["district_ids"] == []
     me = (await mgr.get("/api/v1/auth/me")).json()
-    assert me["permissions"] == sorted(["accounting.view", "orders.view", "orders.unlock", "customers.view", "customers.location_confirm", "staff.view", "vehicles.view", "settings.view",
+    assert me["permissions"] == sorted(["accounting.view", "orders.view", "orders.unlock", "customers.view", "customers.location_confirm", "staff.view", "vehicles.view", "settings.view", "settings.tariff",
                                         "requests.view", "stats.view"])
     assert me["district_ids"] == sorted(world["districts"].values())
     assert (await gps.get("/api/v1/auth/me")).json()["district_ids"] == [world["districts"]["a"]]

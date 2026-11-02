@@ -233,6 +233,8 @@ def didox(c: dict) -> list:
         ("p", "11.3. QMCh grafik asosida «signal» usuli bo‘yicha olinganda konteynerlar yuzasidan shartnoma tuzish istisno qilinadi. Bunda "
               "tashkilotlarga QMChni yig‘ish va saqlash uchun jamoat joylariga qo‘yilgan konteynerlardan foydalanishiga ruxsat etiladi."),
         ("p", "11.4. Grafik asosida xizmat ko‘rsatilganda Ijrochi tomonidan ish to‘liq bajarilgan deb e’tirof etiladi."),
+        ("p", f"11.5. Xizmatlar {c['object_address']} manzilida joylashgan" + (f", kadastr raqami: {c['cadastre']} bo‘lgan" if c["cadastre"] != "______" else "")
+              + f" ko‘chmas mulk obyekti uchun ko‘rsatiladi. Ushbu obyekt Buyurtmachiga {c['ownership_text']}."),
         ("h", "12. SHARTNOMANING AMAL QILISH MUDDATI"),
         ("p", f"12.1. Ushbu shartnomaning amal qilish muddati “{c['vf_d']}” {c['vf_m']} {c['vf_y']} yildan “{c['vt_d']}”.{c['vt_m']}.{c['vt_y']} "
               f"yilgacha belgilanadi. (Izoh bunda byudjet tashkilotlari bilan tuzilgan shartnomalarning kuchga kirish sanasi tuman G‘aznachilik "
@@ -567,8 +569,8 @@ def ommaviy(c: dict) -> list:
         ("p", "10.2. Mazkur Shartnomaning biron bir bandi ijrosi ta’minlanmasa yoki amal qilishi bekor bo‘lsa, bu o‘z navbatida Shartnomaning "
               "boshqa bandlari ijrosi ta’minlanmasligiga yoki amal qilishini bekor bo‘lishiga ta’sir ko‘rsatmasa, Tomonlar o‘zaro kelishuv asosida "
               "ushbu bandlarni yanada qulay shakllarga o‘zgartirish bo‘yicha qo‘shimcha kelishuvlar imzolashi mumkin."),
-        ("p", f"10.3. Xizmatlar Buyurtmachiga tegishli ({c['ownership']} huquqi asosida) bo‘lgan, {c['object_address']} manzilida joylashgan"
-              + (f", kadastr raqami: {c['cadastre']} bo‘lgan" if c["cadastre"] != "______" else "") + " ko‘chmas mulk obyekti uchun amalga oshiriladi."),
+        ("p", f"10.3. Xizmatlar {c['object_address']} manzilida joylashgan" + (f", kadastr raqami: {c['cadastre']} bo‘lgan" if c["cadastre"] != "______" else "")
+              + f" ko‘chmas mulk obyekti uchun amalga oshiriladi. Ushbu obyekt Buyurtmachiga {c['ownership_text']}."),
         ("p", "10.4. Tomonlardan birining yuridik manzili, rekvizitlari o‘zgarganda tomonlar 3 (uch) kalendar kuni ichida tegishli o‘zgarishlar "
               "to‘g‘risida bir-birlarini yozma ravishda xabardor qilish majburiyatini oladilar."),
         ("p", "10.5. Ushbu Shartnoma bo‘yicha ma’lumotlar almashinuvida tomonlarning rasmiy elektron pochtalaridan foydalaniladi."),

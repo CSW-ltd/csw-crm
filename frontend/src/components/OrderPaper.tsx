@@ -128,13 +128,15 @@ export function OrderPaperDialog({ formId, onClose, onChanged }: { formId: numbe
   const f = p?.form;
   // Printerdan chiqqani tasdiqlanmaguncha — o'sha raqam bilan erkin qayta chop etiladi
   const canPrint = !!f && can("orders.print") && !f.closed_at && (!f.printed || f.reprint_allowed || !!p?.awaiting_print);
-  const waiting = !!p?.awaiting_print && !!f?.printed;
+  // Qayta biriktirilgan: qog'ozda eski mashina — yangisi bilan qayta chop etilmaguncha tasdiq yo'q
+  const waiting = !!p?.awaiting_print && !!f?.printed && !p?.needs_reprint;
 
   return (
     <Dialog open onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>{t("of_title")} № {f?.number ?? ""}</DialogTitle>
       <DialogContent dividers sx={{ bgcolor: "#f1efe9" }}>
         {!p ? <Stack alignItems="center" sx={{ py: 6 }}><CircularProgress /></Stack> : <>
+          {p?.needs_reprint && <Alert severity="error" sx={{ mb: 2 }} id="of-needs-reprint">{t("of_needs_reprint")}</Alert>}
           {waiting && <Alert severity="warning" sx={{ mb: 2 }} id="of-await-confirm"
             action={p?.manual_confirm && can("orders.print") ? <Stack direction="row" spacing={1}>
               <Button id="of-confirm" color="success" variant="contained" disableElevation size="small" disabled={busy} onClick={confirm}>{t("of_confirm_yes")}</Button>

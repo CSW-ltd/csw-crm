@@ -2,7 +2,8 @@
 import json
 from datetime import date, datetime, time, timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
+from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +21,8 @@ async def _last_read(db: AsyncSession, user_id: int) -> int:
 
 
 async def _unread(db: AsyncSession, last_read: int) -> int:
-    return (await db.execute(select(func.count()).select_from(SituationEvent).where(SituationEvent.id > last_read))).scalar_one()
+    return (await db.execute(select(func.count()).select_from(SituationEvent).where(
+        SituationEvent.id > last_read, SituationEvent.level != SituationLevel.activity))).scalar_one()
 
 
 @router.get("", response_model=SituationPage)
@@ -41,7 +43,7 @@ async def events(level: SituationLevel | None = None, kind: str | None = Query(N
     if date_to:
         cond.append(SituationEvent.created_at < datetime.combine(date_to + timedelta(days=1), time.min) - timedelta(hours=5))
     if unread:
-        cond.append(SituationEvent.id > last)
+        cond += [SituationEvent.id > last, SituationEvent.level != SituationLevel.activity]
     total = (await db.execute(select(func.count()).select_from(SituationEvent).where(*cond))).scalar_one()
     rows = (await db.execute(select(SituationEvent, User.full_name).outerjoin(User, User.id == SituationEvent.actor_id)
                              .where(*cond).order_by(SituationEvent.id.desc()).limit(limit).offset(offset))).all()
@@ -53,6 +55,39 @@ async def events(level: SituationLevel | None = None, kind: str | None = Query(N
                           created_at=e.created_at, resolved=e.kind == "staff_pending" and e.ref_id not in still_pending)
              for e, name in rows]
     return SituationPage(items=items, total=total, unread=await _unread(db, last), last_read_id=last)
+
+
+@router.get("/export")
+async def export(kind: str | None = Query(None, max_length=40), level: SituationLevel | None = None, district_id: int | None = None,
+                 date_from: date | None = None, date_to: date | None = None, user: User = Viewer, db: AsyncSession = DB) -> Response:
+    """Jurnal: tur tanlangan bo'lsa — shu tur PDF; aks holda ZIP (har bir tur alohida PDF)."""
+    from app.models import District
+    from app.services import situation_export as sx
+    cond = []
+    if kind:
+        cond.append(SituationEvent.kind == kind)
+    if level:
+        cond.append(SituationEvent.level == level)
+    if district_id:
+        cond.append(SituationEvent.district_id == district_id)
+    if date_from:
+        cond.append(SituationEvent.created_at >= datetime.combine(date_from, time.min) - timedelta(hours=5))
+    if date_to:
+        cond.append(SituationEvent.created_at < datetime.combine(date_to + timedelta(days=1), time.min) - timedelta(hours=5))
+    rows = (await db.execute(select(SituationEvent.kind, SituationEvent.created_at, SituationEvent.district_id, User.full_name,
+                                    SituationEvent.message, SituationEvent.level)
+                             .outerjoin(User, User.id == SituationEvent.actor_id).where(*cond)
+                             .order_by(SituationEvent.id).limit(20000))).all()
+    districts = dict((await db.execute(select(District.id, District.name))).all())
+    period = f"{date_from.strftime('%d.%m.%Y') if date_from else '…'} — {date_to.strftime('%d.%m.%Y') if date_to else '…'}"
+    groups: dict[str, list[tuple]] = {}
+    for k, at, did, actor, msg, lvl in rows:
+        groups.setdefault(k, []).append((at, did, actor, msg, lvl))
+    if kind:
+        data = await run_in_threadpool(sx.render, kind, groups.get(kind, []), districts, period)
+        return Response(data, media_type="application/pdf", headers={"Content-Disposition": f'attachment; filename="vaziyat_{kind}.pdf"'})
+    data = await run_in_threadpool(sx.bundle, groups, districts, period)
+    return Response(data, media_type="application/zip", headers={"Content-Disposition": 'attachment; filename="vaziyat_jurnal.zip"'})
 
 
 @router.get("/unread")

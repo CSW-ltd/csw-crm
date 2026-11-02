@@ -60,6 +60,9 @@ async def _new_request(db: AsyncSession, actor: User, cust: Customer, body, repe
     await db.flush()
     req.number = f"M-{req.id:06d}"
     events.record(db, req, actor.id, f"qayta ariza ({repeat_of.number})" if repeat_of else None)
+    situation.activity(db, "act_request_created", f"Murojaat yaratildi: {req.number} «{cust.name}»",
+                       params={"number": req.number, "customer": cust.name, "source": str(body.source.value if hasattr(body.source, "value") else body.source)},
+                       district_id=req.district_id, actor_id=actor.id, ref=("request", req.id))
     if commit:
         await db.commit()
         await events.broadcast(req)
@@ -77,6 +80,9 @@ async def cancel_request(db: AsyncSession, actor: User, request_id: int, reason:
     req.cancel_reason = reason.strip()
     req.finished_at = utcnow()
     events.record(db, req, actor.id, f"bekor qilindi: {req.cancel_reason}")
+    situation.activity(db, "act_request_cancelled", f"Murojaat bekor qilindi: {req.number} — {req.cancel_reason}",
+                       params={"number": req.number, "reason": req.cancel_reason}, district_id=req.district_id, actor_id=actor.id,
+                       ref=("request", req.id))
     await db.commit()
     await events.broadcast(req)
     return req

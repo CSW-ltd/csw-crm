@@ -265,3 +265,22 @@ Batafsil kelishuvlar: `docs/plans/three-stage-flow.md`.
   Buxgalteriya, Haydovchi.
 - **Refresh:** tab, ichki tab, filtr va oy tanlovi saqlanadi; sessiya tugab qayta kirilganda oxirgi sahifa ochiladi.
 - Migratsiya 0015.
+
+## PR #18 tuzatishlari, ta'rif huquqi, faoliyat jurnali (PR #19)
+
+- **Qayta biriktirish:** varaqa printerdan chiqqani tasdiqlanmaguncha (`printing`) qizil kartada «Qayta biriktirish» — boshqa
+  mashinaga o'tkaziladi, varaqa raqami va naryad o'zgarmaydi. Qog'ozda eski mashina bo'lgani uchun yangi mashina bilan qayta chop
+  etilmaguncha tasdiq qabul qilinmaydi (`needs_reprint`).
+- **Ijara bandi:** Andijon shablonida 10.3-band aniqroq («…obyekt Buyurtmachiga ijara huquqi asosida foydalanishga berilgan»),
+  Didox shabloniga 11.5-band (obyekt manzili, kadastr, ijara/mulk) qo'shildi.
+- **Mavjud shartnomalar:** yangi shartnoma bilan bir xil to'liq forma (rekvizitlar, shartlar, «Tekshirish») + raqam, imzolangan sana,
+  platforma ID, skan. Kub turida narx — ta'rif; reys/oylik — qo'lda. Bittalab va Excel bilan kiritilganlar ham **«Tasdiq kutilmoqda»** —
+  buxgalter bittalab tasdiqlaydi. Excel'da rekvizitlar majburiy. Migratsiya 0016 PR #18 da kiritilganlarni tasdiqqa qaytaradi.
+  API: `POST /api/v1/contracts/existing` (ContractDraftIn + `existing`).
+- **Ta'riflar joyi:** manager — «Sozlamalar», admin — «Tumanlar». Huquq `settings.tariff` («Sozlamalar → Ta'rifni belgilash»):
+  managerda standart yoqilgan, admin xodim huquqlarida o'chiradi/yoqadi (migratsiya 0016 mavjud managerlarga beradi).
+- **Faoliyat jurnali (Vaziyat paneli, daraja «Faoliyat»):** murojaat yaratish/bekor qilish, biriktirish, qayta biriktirish, chop etish,
+  printerdan chiqish, varaqa/akt bilan yopish, shartnoma (boshlash, saqlash, imzo, kiritish, tasdiq, qaytarish), ta'rif va qulf,
+  to'lovlar, oyni yopish va fakturalar — kim, qachon, qaysi tuman. Qo'ng'iroqcha soniga kirmaydi.
+  Eksport: `GET /api/v1/situation/export?kind=&level=&district_id=&date_from=&date_to=` — tur tanlangan bo'lsa PDF, aks holda ZIP
+  (har tur alohida PDF).

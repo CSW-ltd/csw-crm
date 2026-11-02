@@ -11,15 +11,17 @@ import { useAppSelector } from "@/store";
 import type { DistrictRadius, ProviderReq } from "@/types";
 import type { MessageKey } from "@/i18n/messages";
 import type { RefData } from "./AdminHome";
+import { TariffsTab } from "./TariffsTab";
 
 const MARKS = [100, 150, 200, 250, 300].map((v) => ({ value: v, label: `${v} m` }));
 const OPTIONS = Array.from({ length: 21 }, (_, i) => 100 + i * 10);
 
 /** Umumiy GPS radiusi (faqat admin) va tumanlar bo'yicha radius (settings.radius_edit — o'z tumanlari). */
-export function SettingsTab(_: RefData) {
+export function SettingsTab(ref: RefData) {
   const { t, tErr } = useI18n();
   const can = useCan();
-  const isAdmin = useAppSelector((s) => s.auth.user?.role) === "admin";
+  const role = useAppSelector((s) => s.auth.user?.role);
+  const isAdmin = role === "admin";
   const canDistrict = can("settings.radius_edit");
   const [saved, setSaved] = useState<number | null>(null);
   const [radius, setRadius] = useState(300);
@@ -83,6 +85,8 @@ export function SettingsTab(_: RefData) {
         </Table>
       </Paper>
       <Requisites isAdmin={isAdmin} />
+      {/* Manager: o'z tumanlari ta'rifi shu yerda (admin uchun — «Tumanlar» bo'limida) */}
+      {role === "manager" && <><Typography variant="h6" sx={{ pt: 1 }} id="tariffs-title">{t("tab_tariffs")}</Typography><TariffsTab {...ref} /></>}
     </Stack>
   );
 }

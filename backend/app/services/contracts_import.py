@@ -1,6 +1,7 @@
-"""Mavjud (qo'lda tuzilgan) shartnomalarni tizimga kiritish: bittalab forma va Excel import (avval sinov).
+"""Mavjud (qo'lda tuzilgan) shartnomalarni Excel orqali kiritish (avval sinov). Bittalab forma — contracts.create_existing.
 
-Kiritilgan shartnoma darhol «Tasdiqlangan» (allaqachon imzolangan), source = manual | import, tarixda «imported».
+Yangi shartnoma bilan bir xil to'liq ma'lumot (rekvizitlar majburiy); har bir shartnoma «Tasdiq kutilmoqda» holatida
+buxgalter navbatiga tushadi va bittalab tasdiqlanadi. source = import, tarixda «imported».
 Korxona: tuman + STIR (yoki tuman + nom) bo'yicha topiladi, topilmasa yaratiladi. Kub turidagi shartnomada hisob — ta'rif bo'yicha.
 """
 import io
@@ -10,7 +11,6 @@ from decimal import Decimal, InvalidOperation
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
-from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -18,7 +18,8 @@ from app.core.errors import conflict, invalid, not_found
 from app.db.base import utcnow
 from app.models import Contract, ContractEvent, Customer, District, User
 from app.models.enums import ContractType, LocationStatus
-from app.services import access
+from app.services import access, situation
+from app.services.tariffs import price_for
 from app.services.customer_service import _check_stir
 from app.services.normalize import format_phone, key as name_key
 from app.services.customer_import import next_fixed_no_start
@@ -26,20 +27,6 @@ from app.services.customer_import import next_fixed_no_start
 TYPES = {"kub": ContractType.by_volume, "hajm": ContractType.by_volume, "by_volume": ContractType.by_volume,
          "reys": ContractType.per_trip, "per_trip": ContractType.per_trip, "oylik": ContractType.monthly, "abonent": ContractType.monthly,
          "monthly": ContractType.monthly, "bir martalik": ContractType.one_off, "one_off": ContractType.one_off}
-
-
-class ExistingIn(BaseModel):
-    customer_id: int
-    number: str = Field(min_length=1, max_length=40)
-    platform: str | None = Field(None, pattern="^(didox|hujjat|soliq|other)$")
-    platform_id: str | None = Field(None, max_length=40)
-    type: ContractType = ContractType.by_volume
-    price: Decimal | None = Field(None, ge=0, max_digits=14, decimal_places=2)
-    annual_volume: Decimal | None = Field(None, ge=0, max_digits=12, decimal_places=2)
-    signed_on: date
-    valid_from: date
-    valid_to: date
-    sign_method: str = Field("paper", pattern="^(electronic|paper)$")
 
 
 async def _check(db: AsyncSession, cust: Customer, number: str, platform_id: str | None, ctype: ContractType, price, vf: date, vt: date,
@@ -64,25 +51,8 @@ def _make(cust_id: int, actor: User, number: str, platform: str | None, platform
     now = utcnow()
     return Contract(customer_id=cust_id, number=number, platform=platform if platform_id else None, platform_id=platform_id or None,
                     type=ctype, price=price, annual_volume=volume, signed_on=signed_on, valid_from=vf, valid_to=vt, sign_method=method,
-                    status="approved", is_active=True, signed_at=now, approved_at=now, approved_by_id=actor.id, created_by_id=actor.id,
+                    status="signed", is_active=True, signed_at=now, created_by_id=actor.id,
                     source=source, events=[ContractEvent(actor_id=actor.id, action="imported")])
-
-
-async def create_one(db: AsyncSession, actor: User, body: ExistingIn) -> Contract:
-    cust = await db.get(Customer, body.customer_id)
-    if not cust:
-        raise not_found("customer")
-    access.check_scope(actor, cust.district_id)
-    pid = (body.platform_id or "").strip() or None
-    err = await _check(db, cust, body.number.strip(), pid, body.type, body.price, body.valid_from, body.valid_to)
-    if err:
-        raise (conflict if err in ("contract_number_taken", "platform_id_taken", "overlap") else invalid)(err, "Shartnomani kiritib bo'lmaydi")
-    ct = _make(cust.id, actor, body.number.strip(), body.platform, pid, body.type, body.price, body.annual_volume, body.signed_on,
-               body.valid_from, body.valid_to, body.sign_method, "manual")
-    db.add(ct)
-    await db.commit()
-    from app.services.contracts import get
-    return await get(db, actor, ct.id)
 
 
 # --- Excel ---
@@ -182,18 +152,28 @@ async def import_file(db: AsyncSession, actor: User, file_name: str, content: by
             err = "out_of_scope"
         elif len(name) < 2:
             err = "name_required"
-        elif stir and len(stir) != 9:
+        elif len(stir) != 9:
             err = "stir"
-        elif account and len(account) != 20:
+        elif not str(g("director") or "").strip():
+            err = "director_required"
+        elif len(_digits(g("phone"))[-9:]) != 9:
+            err = "phone"
+        elif not str(g("legal_address") or "").strip():
+            err = "legal_address_required"
+        elif not str(g("bank") or "").strip():
+            err = "bank_required"
+        elif len(account) != 20:
             err = "account"
-        elif mfo and len(mfo) != 5:
+        elif len(mfo) != 5:
             err = "mfo"
         elif not number:
             err = "number_required"
         elif not ctype:
             err = "bad_type"
-        elif not vf or not vt:
+        elif not vf or not vt or not signed:
             err = "bad_date"
+        elif ctype == ContractType.by_volume and not volume:
+            err = "volume_required"
         if not err:
             cust = next((c for c in customers if c.district_id == d.id and ((stir and c.stir == stir) or c.name_key == name_key(name))), None)
             if stir and not cust:
@@ -234,9 +214,13 @@ async def import_file(db: AsyncSession, actor: User, file_name: str, content: by
             if r["stir"] and not cust.stir:
                 cust.stir = r["stir"]
             pid, price, volume, signed = r["_contract"]
+            if ContractType(r["type"]) == ContractType.by_volume:
+                price = await price_for(db, r["district_id"], r["valid_from"]) or price
             db.add(_make(cust.id, actor, r["number"], "didox" if pid else None, pid, ContractType(r["type"]), price, volume, signed,
                          r["valid_from"], r["valid_to"], "electronic" if pid else "paper", "import"))
             created += 1
+        situation.activity(db, "act_contract_import", f"Excel'dan mavjud shartnomalar kiritildi (tasdiqqa): {created} ta ({file_name})",
+                           params={"count": created, "file": file_name}, actor_id=actor.id)
         await db.commit()
     return {"dry_run": dry_run, "ok": len(rows), "total": len(rows) + len(errors), "created": created, "errors": errors,
             "rows": [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows[:500]]}

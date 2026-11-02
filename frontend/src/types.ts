@@ -224,6 +224,8 @@ export interface OrderPaper {
   waste_type: string;
   /** printerdan chiqqani hali tasdiqlanmagan (karta qizil) */
   awaiting_print?: boolean;
+  /** qayta biriktirilgan — yangi mashina bilan qayta chop etish kerak */
+  needs_reprint?: boolean;
   /** tumanda agentsiz rejim: GPS «Varaqa chiqdi»ni o'zi bosadi */
   manual_confirm?: boolean;
 }
@@ -299,7 +301,7 @@ export interface Coords {
   accuracy?: number;
 }
 
-export type SituationLevel = "info" | "warning" | "error";
+export type SituationLevel = "info" | "warning" | "error" | "activity";
 
 export interface SituationEvent {
   id: number;
@@ -345,7 +347,8 @@ export interface Requisites { name: string; stir: string | null; director: strin
   address: string | null; bank: string | null; mfo: string | null; account: string | null; oked: string | null; cadastre: string | null;
   is_rented?: boolean }
 export interface ContractDraft { customer_id: number; requisites: Requisites; type: ContractType; price: number | null; annual_volume: number | null;
-  annual_trips: number | null; valid_from: string; valid_to: string; place: string; sign_method: "electronic" | "paper" }
+  annual_trips: number | null; valid_from: string; valid_to: string; place: string; sign_method: "electronic" | "paper";
+  existing?: { number: string; signed_on: string | null; platform?: string | null; platform_id?: string | null } | null }
 export interface ContractCheck { ok: boolean; errors: { field: string; code: string }[];
   totals: { qty: number; unit: string; net: number; vat: number; total: number; words: string; price?: number | null } }
 export interface ContractEventItem { action: string; comment: string | null; at: string; actor: string | null }

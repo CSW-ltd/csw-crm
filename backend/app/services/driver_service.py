@@ -150,6 +150,9 @@ async def complete(db: AsyncSession, driver: User, request_id: int, data: Comple
     from app.services.order_forms import close_by_act
     close_by_act(req.order_form, driver.id, data.volume_m3)  # planshetda yakunlangan — varaqa ham yopiladi (yashil)
     events.record(db, req, driver.id, note)
+    situation.activity(db, "act_act_completed", f"Haydovchi dalolatnoma bilan yakunladi: {req.number} «{cust.name}», {data.volume_m3} m³",
+                       params={"number": req.number, "customer": cust.name, "volume": float(data.volume_m3 or 0)},
+                       district_id=req.district_id, actor_id=driver.id, ref=("request", req.id))
     if in_radius is False:
         situation.add(db, SituationLevel.warning, "act_suspect",
                       f"Shubhali dalolatnoma: {req.number} «{cust.name}» — korxonadan {dist} m uzoqda yopildi (radius {radius} m)",

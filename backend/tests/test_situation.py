@@ -93,7 +93,7 @@ async def test_driver_events_suspect_failed_and_import(world, client_factory):
     await driver.post(f"/api/v1/driver/requests/{r2}/fail", json={"reason": "no_recipient", "note": "Qo'riqchi kiritmadi"})
     await _import(admin, dry_run=True)   # tahlil — hodisa yo'q
     await _import(admin, dry_run=False)
-    items = (await _events(admin))["items"]
+    items = [e for e in (await _events(admin))["items"] if e["level"] != "activity"]
     assert [e["kind"] for e in items] == ["import_done", "request_failed", "act_suspect"]
     assert items[0]["params"]["new"] == 3 and items[0]["ref_type"] == "import"
     assert items[1]["params"]["reason"] == "no_recipient" and items[1]["params"]["note"] == "Qo'riqchi kiritmadi"
