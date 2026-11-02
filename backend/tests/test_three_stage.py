@@ -8,14 +8,14 @@ from sqlalchemy import select
 from app.models import Customer, SituationEvent
 from app.services import order_forms, schedule
 from tests.conftest import PNG
-from tests.helpers import NEAR, fill_act, schedule_driver
+from tests.helpers import assign, NEAR, fill_act, schedule_driver
 
 CODE = "KD7HX2M"
 
 
 @pytest.fixture
 def fixed_code(monkeypatch):
-    codes = iter([CODE, "PRT2345", "ZZZ9999"])
+    codes = iter([CODE, "PRT2345", "ZZZ9999", "YYY8888", "XXX7777"])
     monkeypatch.setattr(order_forms, "new_code", lambda: next(codes))
 
 
@@ -23,7 +23,7 @@ async def _assigned(world, client_factory):
     gps, driver = await client_factory("gps"), await client_factory("driver")
     await schedule_driver(gps, driver, world["users"]["driver"], world["vehicles"]["v1"])
     rid = world["requests"][0]
-    r = await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v1"]})
+    r = await assign(gps, rid, world["vehicles"]["v1"], confirm=False)
     assert r.status_code == 200, r.text
     return gps, driver, rid, r.json()
 
@@ -84,13 +84,24 @@ async def test_integration_api_key(world, client_factory, monkeypatch):
 
 async def test_assign_creates_order_form_without_exposing_code(world, client_factory, fixed_code):
     gps, driver, rid, req = await _assigned(world, client_factory)
-    assert req["stage"] == "yellow" and req["vehicle"]["plate"] == "60 101 AB" and req["driver_name"] == "Haydovchi A"
+    # Varaqa printerdan chiqmaguncha — qizil (printing), haydovchiga vazifa ko'rinmaydi
+    assert req["status"] == "printing" and req["stage"] == "red" and req["vehicle"]["plate"] == "60 101 AB" and req["driver_name"] == "Haydovchi A"
+    assert rid in [x["id"] for x in (await gps.get("/api/v1/gps/requests")).json()]
+    assert (await driver.get("/api/v1/driver/tasks")).json() == [] or rid not in [x["id"] for x in (await driver.get("/api/v1/driver/tasks")).json()]
     form = req["order_form"]
     assert re.fullmatch(r"\d{7}", form["number"]) and not form["printed"]
+    assert (await gps.post(f"/api/v1/order-forms/{form['id']}/confirm-print")).json()["error"]["code"] == "not_printed"
     paper = await gps.get(f"/api/v1/order-forms/{form['id']}")
     assert paper.status_code == 200 and paper.json()["customer"]["code"] == world["customer"].code
     pdf = await gps.post(f"/api/v1/order-forms/{form['id']}/print")
     assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF") and pdf.headers["cache-control"] == "no-store"
+    # Printer xato bersa — tasdiqgacha o'sha raqam bilan qayta chop etiladi (manager ruxsatisiz)
+    assert (await gps.post(f"/api/v1/order-forms/{form['id']}/print")).status_code == 200
+    r = (await gps.post(f"/api/v1/order-forms/{form['id']}/confirm-print")).json()
+    assert r["status"] == "assigned" and r["form"]["number"] == form["number"] and r["form"]["print_confirm_via"] == "manual"
+    assert rid not in [x["id"] for x in (await gps.get("/api/v1/gps/requests")).json()]
+    assert rid in [x["id"] for x in (await driver.get("/api/v1/driver/tasks")).json()]
+    assert (await gps.post(f"/api/v1/order-forms/{form['id']}/confirm-print")).json()["error"]["code"] == "not_printing"
     # Kod yoki uning xeshi hech bir JSON javobida yo'q
     legal, admin = await client_factory("legal"), await client_factory("admin")
     for c, url in ((gps, f"/api/v1/order-forms/{form['id']}"), (legal, f"/api/v1/requests/{rid}"), (admin, "/api/v1/requests"),
@@ -102,7 +113,7 @@ async def test_assign_creates_order_form_without_exposing_code(world, client_fac
     assert (await gps.post(f"/api/v1/order-forms/{form['id']}/print")).json()["error"]["code"] == "already_printed"
     manager = await client_factory("manager")
     assert (await manager.post(f"/api/v1/order-forms/{form['id']}/allow-reprint")).json()["reprint_allowed"]
-    assert (await gps.post(f"/api/v1/order-forms/{form['id']}/print")).status_code == 200  # yangi kod: PRT2345
+    assert (await gps.post(f"/api/v1/order-forms/{form['id']}/print")).status_code == 200  # yangi kod
     assert (await gps.post(f"/api/v1/order-forms/{form['id']}/print")).json()["error"]["code"] == "already_printed"
 
 
@@ -112,6 +123,7 @@ async def test_legal_closes_with_scan_code_volume_and_type(world, client_factory
     legal, manager = await client_factory("legal"), await client_factory("manager")
     assert (await legal.post(f"/api/v1/order-forms/{fid}/verify", json={"code": CODE})).json()["error"]["code"] == "not_printed"
     await gps.post(f"/api/v1/order-forms/{fid}/print")
+    await gps.post(f"/api/v1/order-forms/{fid}/confirm-print")
     # Sariq ro'yxatda: maxsus raqam va varaqa raqami bo'yicha topiladi
     for q in (world["customer"].code, req["order_form"]["number"]):
         items = (await legal.get("/api/v1/requests", params={"stage": "yellow", "q": q})).json()["items"]
@@ -156,6 +168,8 @@ async def test_legal_closes_with_scan_code_volume_and_type(world, client_factory
 
 async def test_tablet_act_turns_green_and_closes_form(world, client_factory):
     gps, driver, rid, req = await _assigned(world, client_factory)
+    await gps.post(f"/api/v1/order-forms/{req['order_form']['id']}/print")
+    await gps.post(f"/api/v1/order-forms/{req['order_form']['id']}/confirm-print")
     await driver.post(f"/api/v1/driver/requests/{rid}/enroute")
     await fill_act(driver, rid, NEAR)
     r = await driver.post(f"/api/v1/driver/requests/{rid}/complete",
@@ -169,3 +183,18 @@ async def test_tablet_act_turns_green_and_closes_form(world, client_factory):
     assert (await driver.post("/api/v1/driver/location", json=NEAR)).status_code == 204
     today = (await driver.get("/api/v1/driver/today")).json()
     assert today["vehicle"]["plate"] == "60 101 AB" and today["service"] == "legal"
+
+
+async def test_print_confirm_requires_agent_when_manual_mode_off(world, client_factory, sessionmaker):
+    from sqlalchemy import update
+    from app.models import District
+    async with sessionmaker() as s:
+        await s.execute(update(District).where(District.id == world["districts"]["a"]).values(print_manual_confirm=False))
+        await s.commit()
+    gps, driver, rid, req = await _assigned(world, client_factory)
+    fid = req["order_form"]["id"]
+    await gps.post(f"/api/v1/order-forms/{fid}/print")
+    r = await gps.post(f"/api/v1/order-forms/{fid}/confirm-print")
+    assert r.status_code == 403
+    # Qayta biriktirish urinishi — o'sha murojaat (printing) yangi varaqa yaratmaydi
+    assert (await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v1"]})).status_code == 409

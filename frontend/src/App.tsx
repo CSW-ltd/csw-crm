@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from "react";
 import { Alert, Box, CircularProgress } from "@mui/material";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { rememberPath } from "@/hooks/usePersisted";
 import { DriverLayout } from "@/components/DriverLayout";
 import { useI18n } from "@/i18n/I18nContext";
 import type { MessageKey } from "@/i18n/messages";
@@ -13,7 +14,8 @@ import { OperatorHome } from "@/pages/operator/OperatorHome";
 import { AdminHome } from "@/pages/admin/AdminHome";
 import { CompanyPage } from "@/pages/admin/CompanyPage";
 import { ChangePasswordPage } from "@/pages/ChangePasswordPage";
-import { homePath } from "@/lib/routes";
+import { afterLoginPath } from "@/lib/routes";
+import { lastPath } from "@/hooks/usePersisted";
 import { useAppDispatch, useAppSelector } from "@/store";
 import { loadMe, sessionExpired } from "@/store/authSlice";
 import { refreshDriver } from "@/store/driverSlice";
@@ -42,12 +44,19 @@ function DriverSection({ children }: { children: ReactNode }) {
   return <DriverLayout>{children}</DriverLayout>;
 }
 
+/** Har sahifa almashganda oxirgi yo'l (+ #tab) eslab qolinadi — refresh yoki qayta kirishdan keyin o'sha sahifa ochiladi. */
+function PathMemory() {
+  const loc = useLocation();
+  useEffect(() => { rememberPath(loc.pathname + loc.search + loc.hash); }, [loc.pathname, loc.search, loc.hash]);
+  return null;
+}
+
 function Home() {
   const user = useAppSelector((s) => s.auth.user);
   const status = useAppSelector((s) => s.auth.status);
   if (status !== "ready") return null;
   if (!user) return <Navigate to="/login" replace />;
-  const home = homePath(user);
+  const home = afterLoginPath(user, lastPath());
   if (home !== "/") return <Navigate to={home} replace />;
   return <Alert severity="info" sx={{ m: 2 }}>Bu rol uchun panel keyingi bosqichda qo'shiladi ({user.role}).</Alert>;
 }
@@ -69,6 +78,7 @@ export function App() {
 
   return (
     <BrowserRouter>
+      <PathMemory />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/driver" element={<RequireRole roles={["driver"]}><DriverSection><DriverHome /></DriverSection></RequireRole>} />

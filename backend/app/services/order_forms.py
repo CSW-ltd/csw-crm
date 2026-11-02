@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.errors import AppError, conflict, invalid, not_found
+from app.core.errors import AppError, conflict, forbidden, invalid, not_found
 from app.db.base import utcnow
 from app.models import District, OrderForm, Provider, Request, User
 from app.models.enums import RequestStatus, SituationLevel
@@ -49,7 +49,12 @@ def new_code() -> str:
 
 
 async def create_for(db: AsyncSession, req: Request, actor: User) -> OrderForm:
-    """Mashina biriktirilganda chaqiriladi (commit — chaqiruvchida). Raqam: 7 xonali tartib raqami."""
+    """Mashina biriktirilganda chaqiriladi (commit — chaqiruvchida). Raqam: 7 xonali tartib raqami.
+    Bitta murojaatga bitta varaqa: mavjud bo'lsa (yopilmagan) — o'sha raqam saqlanadi."""
+    existing = (await db.execute(select(OrderForm).where(OrderForm.request_id == req.id))).scalar_one_or_none()
+    if existing:
+        req.order_form = existing
+        return existing
     form = OrderForm(request_id=req.id, created_by_id=actor.id)
     req.order_form = form
     db.add(form)
@@ -80,7 +85,10 @@ async def paper(db: AsyncSession, user: User, form_id: int) -> dict:
             "customer": {"name": req.customer.name, "code": req.customer.code, "address": req.customer.address},
             "vehicle": {"plate": req.vehicle.plate, "model": req.vehicle.model} if req.vehicle else None,
             "driver_name": req.driver.full_name if req.driver else None, "assigned_at": req.assigned_at,
-            "waste_type": req.waste_type.value}
+            "waste_type": req.waste_type.value,
+            # printerdan chiqqani tasdiqlanmagan: qizil kartada; manual_confirm — tumanda agentsiz rejim
+            "awaiting_print": req.status == RequestStatus.printing,
+            "manual_confirm": bool((d := await db.get(District, req.district_id)) and d.print_manual_confirm)}
 
 
 def brief(f: OrderForm | None) -> dict | None:
@@ -89,7 +97,8 @@ def brief(f: OrderForm | None) -> dict | None:
     return {"id": f.id, "number": f.number, "printed": f.print_count > 0, "print_count": f.print_count, "printed_at": f.printed_at,
             "reprint_allowed": f.reprint_allowed, "locked": f.locked, "attempts_left": max(0, MAX_ATTEMPTS - f.attempts),
             "has_scan": bool(f.scan_key), "verified": f.verified_at is not None, "closed_at": f.closed_at, "closed_via": f.closed_via,
-            "volume_m3": float(f.volume_m3) if f.volume_m3 is not None else None, "waste_kind": f.waste_kind}
+            "volume_m3": float(f.volume_m3) if f.volume_m3 is not None else None, "waste_kind": f.waste_kind,
+            "print_confirmed": f.print_confirmed_at is not None, "print_confirm_via": f.print_confirm_via}
 
 
 async def print_pdf(db: AsyncSession, user: User, form_id: int) -> tuple[bytes, str]:
@@ -98,7 +107,8 @@ async def print_pdf(db: AsyncSession, user: User, form_id: int) -> tuple[bytes, 
     form, req = await _form(db, user, form_id, lock=True)
     if form.closed_at:
         raise conflict("order_closed", "Murojaat yopilgan")
-    if form.print_count > 0 and not form.reprint_allowed:
+    # Printerdan chiqqani tasdiqlanmaguncha (status printing) — o'sha raqam bilan erkin qayta chop etiladi
+    if form.print_count > 0 and not form.reprint_allowed and req.status != RequestStatus.printing:
         raise conflict("already_printed", "Varaqa allaqachon chop etilgan. Qayta chop etish uchun manager ruxsati kerak")
     code = new_code()
     reprint = form.print_count > 0
@@ -217,3 +227,23 @@ def close_by_act(form: OrderForm | None, driver_id: int, volume_m3: Decimal) -> 
     """Planshetda dalolatnoma yakunlansa varaqa ham yopilgan hisoblanadi (commit — chaqiruvchida)."""
     if form and not form.closed_at:
         form.closed_at, form.closed_by_id, form.closed_via, form.volume_m3 = utcnow(), driver_id, "act", volume_m3
+
+
+async def confirm_printed(db: AsyncSession, user: User, form_id: int, via: str) -> Request:
+    """Varaqa printerdan chiqdi: murojaat qizildan sariqqa (biriktirilgan) o'tadi, haydovchiga vazifa ko'rinadi.
+    via="agent" — printer agenti (PR #20), via="manual" — faqat tumanda agentsiz rejim yoqilgan bo'lsa."""
+    form, req = await _form(db, user, form_id, lock=True)
+    if req.status != RequestStatus.printing:
+        raise conflict("not_printing", "Murojaat varaqa chop etilishini kutmayapti")
+    if not form.print_count:
+        raise conflict("not_printed", "Varaqa hali chop etilmagan")
+    if via == "manual":
+        d = await db.get(District, req.district_id)
+        if not d or not d.print_manual_confirm:
+            raise forbidden("Bu tumanda varaqa faqat printer agenti orqali tasdiqlanadi")
+    form.print_confirmed_at, form.print_confirmed_by_id, form.print_confirm_via = utcnow(), user.id, via
+    req.status = RequestStatus.assigned
+    events.record(db, req, user.id, f"varaqa {form.number} printerdan chiqdi ({'agent' if via == 'agent' else 'qo‘lda tasdiq'})")
+    await db.commit()
+    await events.broadcast(req)
+    return await req_repo.by_id(db, req.id)

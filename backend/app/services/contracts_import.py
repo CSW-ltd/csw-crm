@@ -1,0 +1,242 @@
+"""Mavjud (qo'lda tuzilgan) shartnomalarni tizimga kiritish: bittalab forma va Excel import (avval sinov).
+
+Kiritilgan shartnoma darhol «Tasdiqlangan» (allaqachon imzolangan), source = manual | import, tarixda «imported».
+Korxona: tuman + STIR (yoki tuman + nom) bo'yicha topiladi, topilmasa yaratiladi. Kub turidagi shartnomada hisob — ta'rif bo'yicha.
+"""
+import io
+import re
+from datetime import date, datetime
+from decimal import Decimal, InvalidOperation
+
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.errors import conflict, invalid, not_found
+from app.db.base import utcnow
+from app.models import Contract, ContractEvent, Customer, District, User
+from app.models.enums import ContractType, LocationStatus
+from app.services import access
+from app.services.customer_service import _check_stir
+from app.services.normalize import format_phone, key as name_key
+from app.services.customer_import import next_fixed_no_start
+
+TYPES = {"kub": ContractType.by_volume, "hajm": ContractType.by_volume, "by_volume": ContractType.by_volume,
+         "reys": ContractType.per_trip, "per_trip": ContractType.per_trip, "oylik": ContractType.monthly, "abonent": ContractType.monthly,
+         "monthly": ContractType.monthly, "bir martalik": ContractType.one_off, "one_off": ContractType.one_off}
+
+
+class ExistingIn(BaseModel):
+    customer_id: int
+    number: str = Field(min_length=1, max_length=40)
+    platform: str | None = Field(None, pattern="^(didox|hujjat|soliq|other)$")
+    platform_id: str | None = Field(None, max_length=40)
+    type: ContractType = ContractType.by_volume
+    price: Decimal | None = Field(None, ge=0, max_digits=14, decimal_places=2)
+    annual_volume: Decimal | None = Field(None, ge=0, max_digits=12, decimal_places=2)
+    signed_on: date
+    valid_from: date
+    valid_to: date
+    sign_method: str = Field("paper", pattern="^(electronic|paper)$")
+
+
+async def _check(db: AsyncSession, cust: Customer, number: str, platform_id: str | None, ctype: ContractType, price, vf: date, vt: date,
+                 seen_numbers: set[str] | None = None) -> str | None:
+    """Xato kodi yoki None."""
+    from app.services.contracts import _overlap
+    if vt < vf:
+        return "bad_dates"
+    if ctype != ContractType.by_volume and not price:
+        return "price_required"
+    if (seen_numbers is not None and number in seen_numbers) or (await db.execute(select(Contract.id).where(Contract.number == number))).first():
+        return "contract_number_taken"
+    if platform_id and (await db.execute(select(Contract.id).where(Contract.platform_id == platform_id))).first():
+        return "platform_id_taken"
+    if cust.id and await _overlap(db, cust.id, vf, vt, None):
+        return "overlap"
+    return None
+
+
+def _make(cust_id: int, actor: User, number: str, platform: str | None, platform_id: str | None, ctype: ContractType, price, volume,
+          signed_on: date, vf: date, vt: date, method: str, source: str) -> Contract:
+    now = utcnow()
+    return Contract(customer_id=cust_id, number=number, platform=platform if platform_id else None, platform_id=platform_id or None,
+                    type=ctype, price=price, annual_volume=volume, signed_on=signed_on, valid_from=vf, valid_to=vt, sign_method=method,
+                    status="approved", is_active=True, signed_at=now, approved_at=now, approved_by_id=actor.id, created_by_id=actor.id,
+                    source=source, events=[ContractEvent(actor_id=actor.id, action="imported")])
+
+
+async def create_one(db: AsyncSession, actor: User, body: ExistingIn) -> Contract:
+    cust = await db.get(Customer, body.customer_id)
+    if not cust:
+        raise not_found("customer")
+    access.check_scope(actor, cust.district_id)
+    pid = (body.platform_id or "").strip() or None
+    err = await _check(db, cust, body.number.strip(), pid, body.type, body.price, body.valid_from, body.valid_to)
+    if err:
+        raise (conflict if err in ("contract_number_taken", "platform_id_taken", "overlap") else invalid)(err, "Shartnomani kiritib bo'lmaydi")
+    ct = _make(cust.id, actor, body.number.strip(), body.platform, pid, body.type, body.price, body.annual_volume, body.signed_on,
+               body.valid_from, body.valid_to, body.sign_method, "manual")
+    db.add(ct)
+    await db.commit()
+    from app.services.contracts import get
+    return await get(db, actor, ct.id)
+
+
+# --- Excel ---
+COLUMNS = [("district", "Tuman / shahar", 22), ("name", "Korxona nomi", 32), ("stir", "STIR (9 raqam)", 14), ("director", "Direktor F.I.Sh.", 24),
+           ("phone", "Telefon", 16), ("legal_address", "Yuridik manzil", 30), ("address", "Obyekt manzili", 30), ("bank", "Bank", 22),
+           ("mfo", "MFO (5)", 9), ("account", "Hisob raqam (20)", 24), ("oked", "OKED", 9), ("number", "Shartnoma raqami", 18),
+           ("platform_id", "Platforma ID (Didox / hujjat.uz)", 22), ("type", "Turi (kub / reys / oylik)", 14),
+           ("price", "Narx (reys/oylik uchun, QQS bilan)", 16), ("annual_volume", "Yillik hajm, m³", 12),
+           ("signed_on", "Imzolangan sana", 14), ("valid_from", "Boshlanish", 13), ("valid_to", "Tugash", 13)]
+
+
+def template_xlsx() -> bytes:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Shartnomalar"
+    for i, (_, title, width) in enumerate(COLUMNS, start=1):
+        c = ws.cell(row=1, column=i, value=title)
+        c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="00A651")
+        ws.column_dimensions[c.column_letter].width = width
+    sample = ["Asaka tumani", "\"Namuna\" MChJ", "300000000", "Namuna Direktor", "90 123 45 67", "Asaka, Namuna ko'chasi 1",
+              "Asaka, Namuna ko'chasi 1", "DEMO bank", "00000", "20208000000000000000", "56290", "1234", "", "kub", "", "120",
+              "01.03.2026", "01.03.2026", "31.12.2026"]
+    for i, v in enumerate(sample, start=1):
+        ws.cell(row=2, column=i, value=v).font = Font(italic=True, color="888888")
+    ws.freeze_panes = "A2"
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def _date(v) -> date | None:
+    if isinstance(v, datetime):
+        return v.date()
+    if isinstance(v, date):
+        return v
+    s = str(v or "").strip()
+    for fmt in ("%d.%m.%Y", "%Y-%m-%d", "%d/%m/%Y", "%d.%m.%y"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def _dec(v) -> Decimal | None:
+    s = re.sub(r"[\s ]", "", str(v or "")).replace(",", ".")
+    if not s:
+        return None
+    try:
+        return Decimal(s)
+    except InvalidOperation:
+        return None
+
+
+def _digits(v) -> str:
+    s = str(v or "").strip()
+    if re.fullmatch(r"\d+\.0", s):  # Excel son sifatida saqlagan
+        s = s[:-2]
+    return re.sub(r"\D", "", s)
+
+
+async def import_file(db: AsyncSession, actor: User, file_name: str, content: bytes, dry_run: bool) -> dict:
+    from app.services.table_readers import read_tables
+    _, tables = read_tables(file_name, content)
+    titles = {t.lower(): k for k, t, _ in COLUMNS}
+    districts = list((await db.execute(select(District).where(District.is_active.is_(True)))).scalars())
+    by_dname = {name_key(d.name): d for d in districts}
+    scope = access.scope(actor)
+    customers = list((await db.execute(select(Customer))).scalars())
+    rows, errors, seen_numbers = [], [], set()
+    header = None
+    table = tables[0] if tables else []
+    for i, row in enumerate(table.rows if hasattr(table, "rows") else table):
+        cells = [str(x or "").strip() for x in row]
+        if header is None:
+            m = {titles[c.lower()]: j for j, c in enumerate(cells) if c.lower() in titles}
+            if {"district", "name", "number", "valid_from", "valid_to"} <= set(m):
+                header = m
+            continue
+        if not any(cells):
+            continue
+        g = lambda k: row[header[k]] if k in header and header[k] < len(row) else None  # noqa: E731
+        line = i + 1
+        dname, name, number = str(g("district") or "").strip(), str(g("name") or "").strip(), str(g("number") or "").strip()
+        if name.startswith('"Namuna"') and number == "1234":
+            continue  # shablondagi namuna qatori
+        d = by_dname.get(name_key(dname))
+        stir = _digits(g("stir"))
+        account, mfo = _digits(g("account")), _digits(g("mfo"))
+        ctype = TYPES.get(str(g("type") or "kub").strip().lower())
+        vf, vt, signed = _date(g("valid_from")), _date(g("valid_to")), _date(g("signed_on"))
+        price, volume = _dec(g("price")), _dec(g("annual_volume"))
+        err = None
+        if not d:
+            err = "district_not_found"
+        elif scope is not None and d.id not in scope:
+            err = "out_of_scope"
+        elif len(name) < 2:
+            err = "name_required"
+        elif stir and len(stir) != 9:
+            err = "stir"
+        elif account and len(account) != 20:
+            err = "account"
+        elif mfo and len(mfo) != 5:
+            err = "mfo"
+        elif not number:
+            err = "number_required"
+        elif not ctype:
+            err = "bad_type"
+        elif not vf or not vt:
+            err = "bad_date"
+        if not err:
+            cust = next((c for c in customers if c.district_id == d.id and ((stir and c.stir == stir) or c.name_key == name_key(name))), None)
+            if stir and not cust:
+                other = next((c for c in customers if c.stir == stir), None)
+                if other:
+                    err = "stir_taken"
+            if not err:
+                err = await _check(db, cust or Customer(id=None), number, str(g("platform_id") or "").strip() or None,
+                                   ctype, price, vf, vt, seen_numbers)
+        if err:
+            errors.append({"line": line, "error": err, "value": number or name})
+            continue
+        seen_numbers.add(number)
+        rows.append({"line": line, "district_id": d.id, "district": d.name, "name": name, "stir": stir or None, "number": number,
+                     "type": ctype.value, "valid_from": vf, "valid_to": vt, "existing_customer": cust.id if cust else None,
+                     "_cust": cust, "_data": {"director": str(g("director") or "").strip() or None, "phone": format_phone(str(g("phone") or "")),
+                                             "legal_address": str(g("legal_address") or "").strip() or None,
+                                             "address": str(g("address") or "").strip() or None, "bank": str(g("bank") or "").strip() or None,
+                                             "mfo": mfo or None, "account": account or None, "oked": _digits(g("oked")) or None},
+                     "_contract": (str(g("platform_id") or "").strip() or None, price, volume, signed or vf)})
+    if header is None:
+        raise invalid("bad_template", "Ustunlar topilmadi — shablondan foydalaning")
+    created = 0
+    if not dry_run and rows:
+        fixed = await next_fixed_no_start(db)
+        for r in rows:
+            cust = r["_cust"]
+            if cust is None:
+                cust = Customer(fixed_no=f"A-{fixed:04d}", name=r["name"], name_key=name_key(r["name"]), district_id=r["district_id"],
+                                stir=r["stir"], source="import", location_status=LocationStatus.none)
+                fixed += 1
+                db.add(cust)
+                await db.flush()
+                customers.append(cust)
+            for k, v in r["_data"].items():
+                if v and not getattr(cust, k):
+                    setattr(cust, k, v)
+            if r["stir"] and not cust.stir:
+                cust.stir = r["stir"]
+            pid, price, volume, signed = r["_contract"]
+            db.add(_make(cust.id, actor, r["number"], "didox" if pid else None, pid, ContractType(r["type"]), price, volume, signed,
+                         r["valid_from"], r["valid_to"], "electronic" if pid else "paper", "import"))
+            created += 1
+        await db.commit()
+    return {"dry_run": dry_run, "ok": len(rows), "total": len(rows) + len(errors), "created": created, "errors": errors,
+            "rows": [{k: v for k, v in r.items() if not k.startswith("_")} for r in rows[:500]]}

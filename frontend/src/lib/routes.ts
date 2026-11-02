@@ -14,3 +14,10 @@ export function homePath(user: User): string {
     default: return "/";
   }
 }
+
+/** Kirgandan keyin: oxirgi ochilgan sahifa shu rolga tegishli bo'lsa — o'sha, aks holda bosh sahifa. */
+export function afterLoginPath(user: User, last: string | null): string {
+  const home = homePath(user);
+  if (!last || home === "/" || home === "/change-password") return home;
+  return last === home || last.startsWith(`${home}#`) || last.startsWith(`${home}/`) || last.startsWith(`${home}?`) ? last : home;
+}

@@ -11,6 +11,7 @@ import { formatDateTime } from "@/lib/format";
 import { getSocket } from "@/lib/socket";
 import type { Appeal, ContractType } from "@/types";
 import { districtLabel, type RefData } from "./AdminHome";
+import { usePersisted } from "@/hooks/usePersisted";
 
 const CONTRACT_TYPES: ContractType[] = ["per_trip", "by_volume", "monthly", "one_off"];
 const today = () => new Date().toISOString().slice(0, 10);
@@ -19,7 +20,7 @@ const today = () => new Date().toISOString().slice(0, 10);
 export function AppealsTab({ districts }: RefData) {
   const { t, tErr } = useI18n();
   const can = useCan();
-  const [status, setStatus] = useState<"new" | "accepted" | "rejected" | "">("new");
+  const [status, setStatus] = usePersisted<"new" | "accepted" | "rejected" | "">("appeals.status", "new");
   const [items, setItems] = useState<Appeal[]>([]);
   const [open, setOpen] = useState<Appeal | null>(null);
 

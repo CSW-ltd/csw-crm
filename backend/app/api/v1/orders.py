@@ -36,6 +36,13 @@ async def print_pdf(form_id: int, user: User = Depends(require_perm("orders.prin
         "Content-Disposition": f'inline; filename="buyurtma-varaqasi-{number}.pdf"', "Cache-Control": "no-store"})
 
 
+@router.post("/{form_id}/confirm-print")
+async def confirm_print(form_id: int, user: User = Depends(require_perm("orders.print")), db: AsyncSession = DB) -> dict:
+    """«Varaqa printerdan chiqdi» (agentsiz rejim). Printer agenti o'z endpointi orqali tasdiqlaydi (PR #20)."""
+    req = await svc.confirm_printed(db, user, form_id, "manual")
+    return {"request_id": req.id, "status": req.status.value, "form": svc.brief(req.order_form)}
+
+
 @router.post("/{form_id}/allow-reprint")
 async def allow_reprint(form_id: int, user: User = Depends(require_perm("orders.unlock")), db: AsyncSession = DB) -> dict:
     return svc.brief(await svc.allow_reprint(db, user, form_id))

@@ -1,5 +1,5 @@
 """Huquqlar: admin → manager (bo'lim/amal + tumanlar), manager → o'z xodimlari, admin tasdig'i, tuman radiusi, Vaziyat."""
-from tests.helpers import fill_act, schedule_driver
+from tests.helpers import assign, fill_act, schedule_driver
 from tests.test_customers import _import
 
 ACT = {"containers": 1, "volume_m3": 2, "note": "Olib ketildi"}
@@ -126,7 +126,7 @@ async def test_district_radius_is_used_for_acts(world, client_factory):
     _, mgr = await _manager_a(world, client_factory, admin, ["settings.radius_edit"])
     a, b = world["districts"]["a"], world["districts"]["b"]
     r = await mgr.put(f"/api/v1/admin/districts/{a}/radius", json={"gps_radius_m": 100})
-    assert r.status_code == 200 and r.json()["districts"] == [{"id": a, "name": "Asaka tumani", "gps_radius_m": 100, "effective_m": 100}]
+    assert r.status_code == 200 and r.json()["districts"] == [{"id": a, "name": "Asaka tumani", "gps_radius_m": 100, "effective_m": 100, "print_manual_confirm": True}]
     assert (await mgr.put(f"/api/v1/admin/districts/{b}/radius", json={"gps_radius_m": 100})).status_code == 403
     ev = (await _events(admin, kind="district_radius_changed"))[0]
     assert ev["params"] == {"name": "Asaka tumani", "old": 300, "new": 100} and ev["actor_name"] == "Manager A"
@@ -135,7 +135,7 @@ async def test_district_radius_is_used_for_acts(world, client_factory):
     await schedule_driver(gps, driver, world["users"]["driver"], world["vehicles"]["v1"])
     rid = world["requests"][0]
     at = {"lat": 40.64285, "lng": 72.2390}
-    await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v1"]})
+    await assign(gps, rid, world["vehicles"]["v1"])
     await driver.post(f"/api/v1/driver/requests/{rid}/enroute")
     await fill_act(driver, rid, at)
     body = (await driver.post(f"/api/v1/driver/requests/{rid}/complete", json={**ACT, **at})).json()

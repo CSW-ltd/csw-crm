@@ -242,3 +242,26 @@ Batafsil kelishuvlar: `docs/plans/three-stage-flow.md`.
   `GET /api/v1/contracts?status=&q=`, `GET /api/v1/contracts/{id}/document?format=pdf|docx`, `POST /api/v1/contracts/{id}/sign`
   (multipart), `GET /api/v1/contracts/{id}/scan`, `POST /api/v1/contracts/{id}/approve`, `POST /api/v1/contracts/{id}/return`.
   Migratsiya 0014. Keyingi: «Qo'shimcha kelishuv», Didox / hujjat.uz integratsiyasi (ERI).
+
+## Varaqa chop tasdig'i, ta'riflar, mavjud shartnomalar (PR #18)
+
+- **Buyurtma varaqasi:** bitta murojaatga bitta raqam (yopilguncha o'zgarmaydi). GPS mashina biriktirgach murojaat `printing`
+  holatida — karta **qizil** qoladi («chop etilishi kutilmoqda»), haydovchiga ko'rinmaydi. Chop etilgach «Varaqa printerdan
+  chiqdimi?»: «Ha» → sariq (`assigned`), «Yo'q» → o'sha raqam bilan qayta chop etiladi (tasdiqgacha manager ruxsati kerak emas).
+  Tasdiqni server printer agentidan qabul qiladi (PR #20); agent o'rnatilguncha tumanda **agentsiz rejim** (standart yoqilgan):
+  admin → Sozlamalar → «Varaqa tasdig'i». API: `POST /api/v1/order-forms/{id}/confirm-print`, `PUT /api/v1/admin/districts/{id}/print-mode`.
+- **Ta'riflar** (Admin/Manager → «Ta'riflar»): 1 m³ narxi (QQS bilan) viloyat bo'yicha, tuman/shahar uchun alohida; sanadan kuchga
+  kiradi, tarix saqlanadi, kelajakdagisini o'chirish mumkin. Manager — o'z tumanlari; admin — hammasi va managerga viloyat yoki
+  tuman bo'yicha qulf. Kub bo'yicha hisob (varaqa, faktura, debitor) **varaqa yopilgan kundagi ta'rif** bo'yicha; ta'rif kiritilmagan
+  hududda — shartnoma narxi. Yangi shartnomada narx ta'rifdan (o'zgartirilmaydi), turi — faqat kub.
+  API: `GET /api/v1/tariffs`, `GET /api/v1/tariffs/price`, `POST /api/v1/tariffs`, `DELETE /api/v1/tariffs/{id}`, `PUT /api/v1/tariffs/lock`.
+- **Raqamli maydonlar:** STIR 9, MFO 5, hisob raqam 20, OKED 5 raqamdan oshmaydi, harf qabul qilinmaydi (barcha formalarda).
+- **Kadastr** ixtiyoriy, yonida «Ijara» belgisi (shartnoma 10.3-bandi: ijara / mulk huquqi asosida).
+- **Tugallanmagan shartnomalar:** korxona tanlangan zahoti raqamsiz loyiha; «Saqlab chiqish» yoki yopish — forma tekshiruvsiz
+  saqlanadi; «Shartnomalar › Tugallanmagan»dan «Davom etish». Raqam — tekshiruvdan o'tgach.
+- **Mavjud shartnomalarni kiritish** («Yangi shartnoma» ustasida): bittalab forma (raqam, platforma ID, tur, sanalar, skan) va
+  Excel (shablon → sinov → import; korxona tuman + STIR yoki nom bo'yicha topiladi, topilmasa yaratiladi). Darhol «Tasdiqlangan».
+- **Rol sarlavhasi:** har oynada katta qilib: Administrator, Boshqaruv (Manager), Call-markaz, GPS dispetcherlik, Yuridik bo'lim,
+  Buxgalteriya, Haydovchi.
+- **Refresh:** tab, ichki tab, filtr va oy tanlovi saqlanadi; sessiya tugab qayta kirilganda oxirgi sahifa ochiladi.
+- Migratsiya 0015.

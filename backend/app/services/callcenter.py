@@ -90,10 +90,11 @@ async def list_requests(db: AsyncSession, actor: User, *, district_id: int | Non
     if hours:
         cond.append(Request.created_at >= utcnow() - timedelta(hours=hours))
     black_edge = utcnow() - timedelta(hours=NORM_HOURS)
+    red_st = [RequestStatus.new, RequestStatus.printing]
     if stage == "red":
-        cond += [Request.status == RequestStatus.new, Request.created_at > black_edge]
+        cond += [Request.status.in_(red_st), Request.created_at > black_edge]
     elif stage == "black":
-        cond += [Request.status == RequestStatus.new, Request.created_at <= black_edge]
+        cond += [Request.status.in_(red_st), Request.created_at <= black_edge]
     elif stage == "yellow":
         cond.append(Request.status.in_([RequestStatus.assigned, RequestStatus.enroute, RequestStatus.onsite, RequestStatus.failed]))
     elif stage == "green":
@@ -302,7 +303,7 @@ async def stage_summary(db: AsyncSession, actor: User, hours: int, district_id: 
     out = {"hours": hours, "red": 0, "black": 0, "yellow": 0, "green": 0}
     for st, created in (await db.execute(q)).all():
         v = st.value
-        if v == "new":
+        if v in ("new", "printing"):
             out["black" if created <= black_edge else "red"] += 1
         elif v in ("done", "suspect"):
             out["green"] += 1

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import DB, get_storage, require_perm
 from app.models import User
 from app.services import contracts as svc
+from app.services import contracts_import as imp
 from app.services.storage import Storage
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
@@ -39,6 +40,48 @@ async def check_existing(contract_id: int, body: svc.ContractDraftIn, user: User
 @router.post("", status_code=201)
 async def create(body: svc.ContractDraftIn, user: User = Legal, db: AsyncSession = DB) -> dict:
     return svc.out(await svc.create(db, user, body), with_events=True)
+
+
+# --- mavjud (qo'lda tuzilgan) shartnomalarni kiritish ---
+@router.post("/existing", status_code=201)
+async def create_existing(body: imp.ExistingIn, user: User = Legal, db: AsyncSession = DB) -> dict:
+    return svc.out(await imp.create_one(db, user, body), with_events=True)
+
+
+@router.get("/existing/template")
+async def existing_template(user: User = Legal) -> Response:
+    return _file(imp.template_xlsx(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "mavjud_shartnomalar_shablon.xlsx",
+                 inline=False)
+
+
+@router.post("/existing/import")
+async def existing_import(dry_run: bool = True, file: UploadFile = File(...), user: User = Legal, db: AsyncSession = DB) -> dict:
+    """Excel: avval dry_run=true (xatolar ro'yxati), keyin dry_run=false."""
+    return await imp.import_file(db, user, file.filename or "shartnomalar.xlsx", await file.read(), dry_run)
+
+
+@router.post("/{contract_id}/scan-upload")
+async def scan_upload(contract_id: int, file: UploadFile = File(...), user: User = Legal, db: AsyncSession = DB,
+                      storage: Storage = Depends(get_storage)) -> dict:
+    """Mavjud shartnoma skanini biriktirish."""
+    return svc.out(await svc.attach_scan(db, storage, user, contract_id, (await file.read(), file.content_type or "", file.filename or "")),
+                   with_events=True)
+
+
+class StartIn(BaseModel):
+    customer_id: int
+
+
+@router.post("/start", status_code=201)
+async def start(body: StartIn, user: User = Legal, db: AsyncSession = DB) -> dict:
+    """Usta: korxona tanlandi — tugallanmagan loyiha (raqamsiz) yaratiladi."""
+    return svc.out(await svc.start(db, user, body.customer_id), with_events=True)
+
+
+@router.put("/{contract_id}/draft")
+async def save_draft(contract_id: int, body: svc.ContractDraftIn, user: User = Legal, db: AsyncSession = DB) -> dict:
+    """Formani tekshiruvsiz saqlash (usta yopilganda / «Orqaga»)."""
+    return svc.out(await svc.save_draft(db, user, contract_id, body), with_events=True)
 
 
 @router.get("")

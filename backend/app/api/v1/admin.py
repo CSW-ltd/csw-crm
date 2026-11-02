@@ -142,7 +142,8 @@ async def update_vehicle(vehicle_id: int, body: VehicleUpdateIn, user: User = pe
 # --- sozlamalar: umumiy GPS radiusi (admin) va tumanlar radiusi ---
 async def _settings(db: AsyncSession, user: User) -> SettingsOut:
     default = await settings_repo.gps_radius(db)
-    rows = [DistrictRadiusOut(id=d.id, name=d.name, gps_radius_m=d.gps_radius_m, effective_m=d.gps_radius_m or default)
+    rows = [DistrictRadiusOut(id=d.id, name=d.name, gps_radius_m=d.gps_radius_m, effective_m=d.gps_radius_m or default,
+                              print_manual_confirm=d.print_manual_confirm)
             for d in await admin_service.list_districts(db, user)]
     return SettingsOut(gps_radius_m=default, districts=rows)
 
@@ -201,6 +202,22 @@ async def put_provider(provider_id: int, body: ProviderIn, admin: User = AdminOn
         setattr(p, k, v.strip() if isinstance(v, str) and v.strip() else None)
     await db.commit()
     return _prov(p)
+
+
+class PrintModeIn(BaseModel):
+    manual: bool
+
+
+@router.put("/districts/{district_id}/print-mode", response_model=SettingsOut)
+async def put_print_mode(district_id: int, body: PrintModeIn, admin: User = AdminOnly, db: AsyncSession = DB):
+    """Agentsiz rejim: yoqilgan bo'lsa GPS «Varaqa chiqdi»ni o'zi tasdiqlaydi; o'chirilsa — faqat printer agenti."""
+    from app.models import District
+    d = await db.get(District, district_id)
+    if not d:
+        raise not_found("district")
+    d.print_manual_confirm = body.manual
+    await db.commit()
+    return await _settings(db, admin)
 
 
 # --- Excel import ---

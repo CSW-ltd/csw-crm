@@ -1,6 +1,6 @@
 export type Role = "admin" | "manager" | "operator" | "gps" | "legal" | "driver" | "accountant";
 export type ShiftStatus = "opened" | "active" | "closed";
-export type RequestStatus = "new" | "assigned" | "enroute" | "onsite" | "done" | "suspect" | "failed" | "cancelled";
+export type RequestStatus = "new" | "printing" | "assigned" | "enroute" | "onsite" | "done" | "suspect" | "failed" | "cancelled";
 export type FileKind = "before" | "after" | "face" | "sign";
 export type FailReason = "no_waste" | "no_recipient" | "no_access";
 
@@ -39,7 +39,8 @@ export interface Access {
   assignable_district_ids: number[] | null;
 }
 
-export interface DistrictRadius { id: number; name: string; gps_radius_m: number | null; effective_m: number }
+export interface DistrictRadius {
+  print_manual_confirm?: boolean; id: number; name: string; gps_radius_m: number | null; effective_m: number }
 
 export interface Region { id: number; name: string }
 export interface District { id: number; name: string; region_id: number; is_active: boolean; gps_radius_m?: number | null }
@@ -196,6 +197,8 @@ export type Stage = "red" | "black" | "yellow" | "green" | "cancelled";
 export interface OrderFormBrief {
   id: number;
   number: string;
+  print_confirmed?: boolean;
+  print_confirm_via?: string | null;
   printed: boolean;
   print_count: number;
   printed_at: string | null;
@@ -219,6 +222,10 @@ export interface OrderPaper {
   driver_name: string | null;
   assigned_at: string | null;
   waste_type: string;
+  /** printerdan chiqqani hali tasdiqlanmagan (karta qizil) */
+  awaiting_print?: boolean;
+  /** tumanda agentsiz rejim: GPS «Varaqa chiqdi»ni o'zi bosadi */
+  manual_confirm?: boolean;
 }
 export type Service = "legal" | "individual";
 export interface ScheduleRow { id?: number; vehicle_id: number; plate?: string; model?: string | null; driver_id: number | null;
@@ -335,15 +342,28 @@ export interface ProviderReq { id: number; name: string; code: string; region_id
 /** «Yangi shartnoma» jarayoni */
 export type ContractStatus = "draft" | "signed" | "returned" | "approved";
 export interface Requisites { name: string; stir: string | null; director: string | null; phone: string | null; legal_address: string | null;
-  address: string | null; bank: string | null; mfo: string | null; account: string | null; oked: string | null; cadastre: string | null }
+  address: string | null; bank: string | null; mfo: string | null; account: string | null; oked: string | null; cadastre: string | null;
+  is_rented?: boolean }
 export interface ContractDraft { customer_id: number; requisites: Requisites; type: ContractType; price: number | null; annual_volume: number | null;
   annual_trips: number | null; valid_from: string; valid_to: string; place: string; sign_method: "electronic" | "paper" }
 export interface ContractCheck { ok: boolean; errors: { field: string; code: string }[];
-  totals: { qty: number; unit: string; net: number; vat: number; total: number; words: string } }
+  totals: { qty: number; unit: string; net: number; vat: number; total: number; words: string; price?: number | null } }
 export interface ContractEventItem { action: string; comment: string | null; at: string; actor: string | null }
-export interface ContractItem { id: number; number: string; platform: string | null; platform_id: string | null; display_number: string;
+export interface ContractItem { id: number; number: string | null; platform: string | null; platform_id: string | null; display_number: string;
   status: ContractStatus; type: ContractType; price: number | null; annual_volume: number | null; annual_trips: number | null;
   valid_from: string; valid_to: string; signed_on: string | null; place: string | null; sign_method: "electronic" | "paper" | null;
   has_scan: boolean; return_comment: string | null; signed_at: string | null; approved_at: string | null; created_at: string;
   total: number; vat: number; is_active: boolean; used_m3?: number; usage_pct?: number; usage_level?: "ok" | "warn" | "over";
-  customer: Requisites & { id: number; code: string | null; district_id: number } | null; events?: ContractEventItem[] }
+  customer: Requisites & { id: number; code: string | null; district_id: number } | null; events?: ContractEventItem[];
+  draft?: Partial<ContractDraft> & { requisites?: Requisites } | null; source?: "flow" | "manual" | "import" }
+export interface ExistingContract { customer_id: number; number: string; platform?: string | null; platform_id?: string | null; type: ContractType;
+  price?: number | null; annual_volume?: number | null; signed_on: string; valid_from: string; valid_to: string; sign_method: "electronic" | "paper" }
+export interface ExistingImportResult { dry_run: boolean; ok: number; total: number; created: number; errors: { line: number; error: string; value: string }[];
+  rows: { line: number; district: string; name: string; stir: string | null; number: string; type: ContractType; valid_from: string; valid_to: string;
+    existing_customer: number | null }[] }
+export interface TariffHist { id: number; price: number; valid_from: string; note: string | null; created_at: string; by: string | null }
+export interface TariffDistrict { district_id: number; name: string; locked: boolean; own_price: number | null; price: number | null;
+  upcoming: { price: number; valid_from: string } | null; can_edit: boolean; history: TariffHist[] }
+export interface TariffRegion { region_id: number; name: string; locked: boolean; price: number | null; upcoming: { price: number; valid_from: string } | null;
+  can_edit: boolean; history: TariffHist[]; districts: TariffDistrict[] }
+export interface TariffOverview { today: string; regions: TariffRegion[] }

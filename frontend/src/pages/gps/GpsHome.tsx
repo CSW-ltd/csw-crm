@@ -18,6 +18,7 @@ import { toast } from "@/lib/alerts";
 import { getSocket } from "@/lib/socket";
 import { useAppSelector } from "@/store";
 import type { DriverTask, RequestItem, ScheduleDay, ScheduleRow, VehicleOption } from "@/types";
+import { usePersisted } from "@/hooks/usePersisted";
 
 type GpsFilter = "new" | "today" | "repeat" | "overdue" | "all";
 const FILTERS: GpsFilter[] = ["new", "today", "repeat", "overdue", "all"];
@@ -37,11 +38,11 @@ export function GpsHome() {
   const { t, tErr } = useI18n();
   const now = useNow();
   const sound = useAlertSound();
-  const [tab, setTab] = useState<"red" | "yellow" | "schedule">("red");
+  const [tab, setTab] = usePersisted<"red" | "yellow" | "schedule">("gps.tab", "red");
   const [red, setRed] = useState<DriverTask[]>([]);
   const [yellow, setYellow] = useState<RequestItem[]>([]);
   const [loaded, setLoaded] = useState(false);
-  const [filter, setFilter] = useState<GpsFilter>("new");
+  const [filter, setFilter] = usePersisted<GpsFilter>("gps.filter", "new");
   const [seenNow, setSeenNow] = useState<Set<number>>(new Set());
   const [paper, setPaper] = useState<number | null>(null);
   const user = useAppSelector((s) => s.auth.user);
@@ -106,7 +107,14 @@ export function GpsHome() {
           {shown.map((r) => (
             <Box key={r.id} onClick={() => markSeen([r.id])}>
               <RedCard r={r} now={now} isNew={isNew(r)}>
-                <AssignBar r={r} onDone={onAssigned} onError={(e) => toast(tErr(errorCode(e), errorMessage(e)), "error")} />
+                {r.status === "printing" && r.order_form
+                  ? <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ sm: "center" }} data-awaiting-print>
+                    <Chip icon={<PrintIcon sx={{ color: "#fff !important" }} />} label={t("of_awaiting_print", { n: r.order_form.number, plate: r.vehicle?.plate ?? "" })}
+                      sx={{ bgcolor: "rgba(0,0,0,.3)", color: "#fff", fontWeight: 600 }} />
+                    <Button variant="contained" disableElevation startIcon={<PrintIcon />} onClick={(e) => { e.stopPropagation(); setPaper(r.order_form!.id); }}
+                      sx={{ bgcolor: "#fff", color: "#8b0f0f", fontWeight: 700, "&:hover": { bgcolor: "#ffe3e3" } }}>{t("of_open_print")}</Button>
+                  </Stack>
+                  : <AssignBar r={r} onDone={onAssigned} onError={(e) => toast(tErr(errorCode(e), errorMessage(e)), "error")} />}
               </RedCard>
             </Box>
           ))}

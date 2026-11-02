@@ -1,7 +1,7 @@
 """Barcha modellar shu yerdan import qilinadi (Alembic autogenerate ham shuni ishlatadi)."""
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, false as sa_false
+from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, false as sa_false, true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, utcnow
@@ -16,8 +16,10 @@ def enum_col(enum_cls):
 
 class Region(Base):
     __tablename__ = "regions"
+    # Admin yopib qo'ysa — managerlar bu viloyat tumanlarining ta'rifini o'zgartira olmaydi
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(100), unique=True)
+    tariff_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
 
 
 class Provider(Base):
@@ -49,6 +51,9 @@ class District(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     # Tuman GPS radiusi (100–300 m); bo'sh bo'lsa umumiy sozlama ishlaydi
     gps_radius_m: Mapped[int | None] = mapped_column(Integer)
+    # Printer agentisiz rejim: GPS «Varaqa chiqdi»ni o'zi tasdiqlaydi (agent o'rnatilguncha). Admin o'chiradi.
+    print_manual_confirm: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
+    tariff_locked: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())  # manager o'zgartira olmaydi
     region: Mapped[Region] = relationship()
 
 
@@ -165,6 +170,7 @@ class Customer(TimestampMixin, Base):
     account: Mapped[str | None] = mapped_column(String(20))
     oked: Mapped[str | None] = mapped_column(String(10))
     cadastre: Mapped[str | None] = mapped_column(String(40))
+    is_rented: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())  # obyekt ijarada
     lat: Mapped[float | None] = mapped_column(Float)
     lng: Mapped[float | None] = mapped_column(Float)
     location_status: Mapped[LocationStatus] = mapped_column(enum_col(LocationStatus), default=LocationStatus.none, server_default="none")
@@ -216,7 +222,7 @@ class Contract(TimestampMixin, Base):
     __tablename__ = "contracts"
     id: Mapped[int] = mapped_column(primary_key=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
-    number: Mapped[str] = mapped_column(String(40), unique=True)
+    number: Mapped[str | None] = mapped_column(String(40), unique=True)  # tugallanmagan loyihada bo'sh
     signed_on: Mapped[date | None] = mapped_column(Date)
     type: Mapped[ContractType] = mapped_column(enum_col(ContractType))
     price: Mapped[float | None] = mapped_column(Numeric(14, 2))
@@ -240,13 +246,30 @@ class Contract(TimestampMixin, Base):
     approved_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     return_comment: Mapped[str | None] = mapped_column(String(500))
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    draft_data: Mapped[str | None] = mapped_column(Text)  # tugallanmagan forma (JSON) — tekshiruvdan o'tmagan
+    source: Mapped[str] = mapped_column(String(10), default="flow", server_default="flow")  # flow | manual | import (mavjud shartnoma)
     customer: Mapped["Customer"] = relationship(viewonly=True)
     events: Mapped[list["ContractEvent"]] = relationship(order_by="ContractEvent.id", cascade="all, delete-orphan")
 
     @property
     def display_number(self) -> str:
         """Platforma (Didox / hujjat.uz) raqami bo'lsa — o'sha, aks holda ichki raqam."""
-        return self.platform_id or self.number
+        return self.platform_id or self.number or ""
+
+
+class Tariff(Base):
+    """Davlat ta'rifi: 1 m³ qattiq maishiy chiqindi narxi (QQS bilan). Viloyat bo'yicha (district_id bo'sh) yoki tuman/shahar uchun alohida.
+    Sanadan kuchga kiradi; hisob-kitob varaqa yopilgan kundagi ta'rif bo'yicha (tuman ta'rifi bo'lsa — u, aks holda viloyatniki)."""
+    __tablename__ = "tariffs"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    region_id: Mapped[int] = mapped_column(ForeignKey("regions.id"), index=True)
+    district_id: Mapped[int | None] = mapped_column(ForeignKey("districts.id"), index=True)
+    price: Mapped[float] = mapped_column(Numeric(14, 2))
+    valid_from: Mapped[date] = mapped_column(Date, index=True)
+    note: Mapped[str | None] = mapped_column(String(255))
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    created_by: Mapped["User | None"] = relationship(lazy="selectin")
 
 
 class ContractEvent(Base):
@@ -301,7 +324,7 @@ class Request(TimestampMixin, Base):
     def stage(self) -> str:
         """Kartaning rangi: red — mashina biriktirilmagan, yellow — chiqindi olinishi kutilmoqda, green — bajarilgan."""
         st = self.status.value
-        if st == "new":
+        if st in ("new", "printing"):  # printing — varaqa printerdan chiqqani tasdiqlanmaguncha qizil
             from app.db.base import utcnow
             return "black" if self.created_at and (utcnow() - self.created_at).total_seconds() >= 72 * 3600 else "red"
         if st in ("done", "suspect"):
@@ -402,6 +425,10 @@ class OrderForm(TimestampMixin, Base):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime)
     closed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     closed_via: Mapped[str | None] = mapped_column(String(10))  # "form" — legal varaqa bilan, "act" — planshetdagi dalolatnoma
+    # Printerdan chiqqani tasdig'i: agent (printer navbati «chop etildi») yoki qo'lda (agentsiz rejim)
+    print_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime)
+    print_confirmed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    print_confirm_via: Mapped[str | None] = mapped_column(String(10))  # "agent" | "manual"
     request: Mapped["Request"] = relationship(back_populates="order_form")
 
 
@@ -543,7 +570,7 @@ class SituationRead(Base):
 
 __all__ = [
     "Base", "Region", "Provider", "District", "User", "Vehicle", "Shift", "Customer", "CustomerContact", "ImportBatch", "Contract",
-    "ContractEvent", "Request", "NaryadCounter", "Act", "ActFile", "RequestEvent", "AppSetting", "SituationEvent", "SituationRead",
+    "ContractEvent", "Tariff", "Request", "NaryadCounter", "Act", "ActFile", "RequestEvent", "AppSetting", "SituationEvent", "SituationRead",
     "UserDistrict", "UserPermission", "Appeal", "RequestSeen", "WorkSchedule", "VehiclePosition", "OrderForm", "Payment", "Invoice", "InvoiceLine",
 ]
 

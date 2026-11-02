@@ -32,8 +32,8 @@ async def active_for_driver(db: AsyncSession, driver_id: int) -> list[Request]:
 
 
 async def new_in_district(db: AsyncSession, district_id: int | None) -> list[Request]:
-    """Biriktirilmagan arizalar — eng yangisi tepada."""
-    q = select(Request).where(Request.status == RequestStatus.new)
+    """Qizil kartalar: biriktirilmagan va varaqasi printerdan chiqishi kutilayotgan murojaatlar — eng yangisi tepada."""
+    q = select(Request).where(Request.status.in_([RequestStatus.new, RequestStatus.printing]))
     if district_id:
         q = q.where(Request.district_id == district_id)
     return list((await db.execute(_with_details(q.order_by(Request.created_at.desc(), Request.id.desc())))).scalars())

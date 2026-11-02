@@ -26,3 +26,15 @@ async def fill_act(driver, request_id: int, coords: dict) -> None:
     for kind in ("face", "sign"):
         assert (await upload(driver, request_id, kind)).status_code == 200
     assert (await upload(driver, request_id, "after", coords)).status_code == 200
+
+
+async def assign(gps, request_id: int, vehicle_id: int, confirm: bool = True):
+    """Mashina biriktirish + varaqani chop etish va «printerdan chiqdi» tasdig'i (agentsiz rejim) — murojaat sariqqa o'tadi.
+    Biriktirish javobini qaytaradi (xato bo'lsa — chop etilmaydi)."""
+    r = await gps.post(f"/api/v1/gps/requests/{request_id}/assign", json={"vehicle_id": vehicle_id})
+    if r.status_code == 200 and confirm:
+        fid = r.json()["order_form"]["id"]
+        assert (await gps.post(f"/api/v1/order-forms/{fid}/print")).status_code == 200
+        c = await gps.post(f"/api/v1/order-forms/{fid}/confirm-print")
+        assert c.status_code == 200, c.text
+    return r

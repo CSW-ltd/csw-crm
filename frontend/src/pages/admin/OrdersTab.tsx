@@ -21,6 +21,7 @@ import { AppealsTab } from "./AppealsTab";
 import { MurojaatBoard } from "./MurojaatBoard";
 import { useAppSelector } from "@/store";
 import type { RefData } from "./AdminHome";
+import { usePersisted } from "@/hooks/usePersisted";
 
 type Sub = "board" | "yellow" | "green" | "appeals";
 
@@ -39,7 +40,7 @@ export function OrdersTab(ref: RefData) {
   const board = role === "admin" || role === "manager";
   const subs: Sub[] = [...(board && can("requests.view") ? ["board" as Sub] : []),
     ...(!board && (can("orders.view") || can("requests.view")) ? ["yellow", "green"] as Sub[] : []), ...(can("appeals.view") ? ["appeals" as Sub] : [])];
-  const [sub, setSub] = useState<Sub>(subs[0] ?? "yellow");
+  const [sub, setSub] = usePersisted<Sub>("orders.sub", subs[0] ?? "yellow");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [yellow, setYellow] = useState<RequestItem[]>([]);

@@ -1,5 +1,5 @@
 from tests.conftest import PASSWORD
-from tests.helpers import schedule_driver  # noqa: F401
+from tests.helpers import assign, schedule_driver  # noqa: F401
 
 TEMP = "Vaqtincha123"
 
@@ -97,7 +97,7 @@ async def test_radius_setting_changes_act_result(world, client_factory):
     await admin.put("/api/v1/admin/settings", json={"gps_radius_m": 150})
     await schedule_driver(gps, driver, world["users"]["driver"], world["vehicles"]["v1"])
     rid = world["requests"][0]
-    await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v1"]})
+    await assign(gps, rid, world["vehicles"]["v1"])
     await driver.post(f"/api/v1/driver/requests/{rid}/enroute")
     at_200m = {"lat": 40.6433, "lng": 72.2390}  # korxonadan ~200 m
     await fill_act(driver, rid, at_200m)

@@ -4,7 +4,7 @@ from sqlalchemy import func, select
 
 from app.models import Customer, ImportBatch, Request
 from app.models.enums import WasteType
-from tests.helpers import FAR, NEAR, fill_act, schedule_driver
+from tests.helpers import assign, FAR, NEAR, fill_act, schedule_driver
 from tests.xlsx_factory import build
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -133,19 +133,19 @@ async def test_incomplete_customer_blocks_assignment_then_first_visit_flow(world
 
     # Shartnomasiz — GPS ro'yxatida ko'rinmaydi
     assert rid not in [r["id"] for r in (await gps.get("/api/v1/gps/requests")).json()]
-    r = await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v1"]})
+    r = await assign(gps, rid, world["vehicles"]["v1"])
     assert r.status_code == 409 and r.json()["error"]["code"] == "customer_incomplete"
 
     # Yuridik bo'lim shartnomani kiritadi (STIR shart emas)
     expired = {"number": "SH-OLD", "type": "per_trip", "valid_from": "2025-01-01", "valid_to": "2025-12-31"}
     await legal.post(f"/api/v1/customers/{cust['id']}/contracts", json=expired)
-    assert (await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v1"]})).status_code == 409
+    assert (await assign(gps, rid, world["vehicles"]["v1"])).status_code == 409
     ct = {"number": "SH-NEW", "type": "per_trip", "valid_from": str(date.today()), "valid_to": str(date.today() + timedelta(days=90))}
     card = (await legal.post(f"/api/v1/customers/{cust['id']}/contracts", json=ct)).json()
     assert card["missing_fields"] == [] and len(card["contracts"]) == 2
     listed = next(r for r in (await gps.get("/api/v1/gps/requests")).json() if r["id"] == rid)
     assert listed["waste_type"] == "septic"
-    r = await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v1"]})
+    r = await assign(gps, rid, world["vehicles"]["v1"])
     assert r.status_code == 200, r.text
     assert r.json()["contract"]["number"] == "SH-NEW"
 
@@ -164,7 +164,7 @@ async def test_incomplete_customer_blocks_assignment_then_first_visit_flow(world
 
     # Keyingi tashrif tasdiqlangan nuqta bo'yicha tekshiriladi: NEAR undan ~750 m uzoqda
     rid2 = await _new_request(sessionmaker, cust["id"], world["districts"]["a"])
-    await gps.post(f"/api/v1/gps/requests/{rid2}/assign", json={"vehicle_id": world["vehicles"]["v1"]})
+    await assign(gps, rid2, world["vehicles"]["v1"])
     await driver.post(f"/api/v1/driver/requests/{rid2}/enroute")
     await fill_act(driver, rid2, NEAR)
     body = (await driver.post(f"/api/v1/driver/requests/{rid2}/complete", json={**ACT, **NEAR})).json()

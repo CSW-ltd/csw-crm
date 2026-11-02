@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Link, MenuItem, Stack, Table, TableBody,
   TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { customersApi, type ContractCreate } from "@/api/endpoints";
+import { onlyDigits } from "@/components/DigitsField";
 import { errorCode, errorMessage } from "@/api/client";
 import { useI18n } from "@/i18n/I18nContext";
 import { toast } from "@/lib/alerts";
@@ -53,7 +54,8 @@ export function CustomerDialog({ id, districts, onClose, onChanged }: Props) {
         phone: opt(card.phone), address: opt(card.address), activity_type: opt(card.activity_type) }));
   const stirBad = card.stir !== "" && !/^\d{9}$/.test(card.stir);
   const field = (k: keyof Card, label: string, extra?: object) => (
-    <TextField id={`cu-${k}`} size="small" label={label} value={card[k]} disabled={!canEdit} onChange={(e) => setCard({ ...card, [k]: e.target.value })} {...extra} />
+    <TextField id={`cu-${k}`} size="small" label={label} value={card[k]} disabled={!canEdit}
+      onChange={(e) => setCard({ ...card, [k]: k === "stir" ? onlyDigits(e.target.value, 9) : e.target.value })} {...extra} />
   );
 
   return (

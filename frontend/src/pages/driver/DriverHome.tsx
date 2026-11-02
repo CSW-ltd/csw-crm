@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { Alert, Badge, Box, Button, Stack, Tab, Tabs, Typography } from "@mui/material";
 import { useNavigate } from "react-router-dom";
 import { SoundToggle, useAlertSound, useNewItemsSignal, useNow } from "@/components/Stage";
@@ -6,6 +5,7 @@ import { GreenCard, YellowCard } from "@/components/StageCards";
 import { useI18n } from "@/i18n/I18nContext";
 import { useAppDispatch, useAppSelector } from "@/store";
 import { refreshDriver } from "@/store/driverSlice";
+import { usePersisted } from "@/hooks/usePersisted";
 
 /** Haydovchi (smenasiz): «Biriktirilgan murojaatlar» — sariq, timer bilan; «Bajarilganlar» — yashil. Yangi biriktirilsa — ovozli alert. */
 export function DriverHome() {
@@ -15,7 +15,7 @@ export function DriverHome() {
   const now = useNow();
   const sound = useAlertSound();
   const { today, tasks, done, loaded } = useAppSelector((s) => s.driver);
-  const [tab, setTab] = useState<"assigned" | "done">("assigned");
+  const [tab, setTab] = usePersisted<"assigned" | "done">("driver.tab", "assigned");
   useNewItemsSignal(tasks.map((x) => x.id), loaded, () => sound.play("yellow"));
 
   if (!loaded) return <Typography>{t("loading")}</Typography>;
