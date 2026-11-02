@@ -14,11 +14,12 @@ import { STAGE } from "@/components/Stage";
 import { useI18n } from "@/i18n/I18nContext";
 import type { MessageKey } from "@/i18n/messages";
 import { toast } from "@/lib/alerts";
-import type { ContractCheck, ContractDraft, ContractItem, CustomerListItem, District, Requisites } from "@/types";
+import type { ContractCheck, ContractDraft, ContractItem, ContractType, CustomerListItem, District, Requisites } from "@/types";
 import { fmtMoney } from "./CompaniesTab";
-import { ExistingContractForm, ExistingImport } from "./ExistingContracts";
+import { ExistingImport } from "./ExistingContracts";
 
 const PLATFORMS = ["didox", "hujjat", "soliq", "other"] as const;
+const EX_TYPES: ContractType[] = ["by_volume", "per_trip", "monthly", "one_off"];
 const todayIso = () => new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
 const yearEnd = () => `${todayIso().slice(0, 4)}-12-31`;
 const EMPTY_REQ: Requisites = { name: "", stir: "", director: "", phone: "", legal_address: "", address: "", bank: "", mfo: "", account: "",
@@ -61,7 +62,11 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   const [tariff, setTariff] = useState<number | null | undefined>(undefined);
   // Boshlang'ich tanlov: yangi shartnoma tuzish yoki mavjud (imzolangan) shartnomani kiritish (bittalab / Excel)
   const [mode, setMode] = useState<"new" | "existing" | "excel">("new");
-  const [exCustomer, setExCustomer] = useState<{ id: number; name: string } | null>(null);
+  // Mavjud shartnoma: yangi bilan bir xil forma + raqam, imzolangan sana, platforma ID, skan → buxgalter tasdig'iga
+  const [ex, setEx] = useState({ number: "", signed_on: "", platform: "didox", platform_id: "" });
+  const [exFile, setExFile] = useState<File | null>(null);
+  const exFileRef = useRef<HTMLInputElement>(null);
+  const isEx = mode === "existing";
   const fromCustomer = (c: Partial<Requisites> & { name: string }) => ({ ...EMPTY_REQ, ...Object.fromEntries(Object.entries(c)
     .filter(([k]) => k in EMPTY_REQ).map(([k, v]) => [k, k === "is_rented" ? !!v : v ?? ""])) } as Requisites);
   const fromContract = useCallback((c: ContractItem) => {
@@ -87,7 +92,13 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
 
   const pickCustomer = async (id: number) => {
     if (mode === "existing") {
-      try { const c = await customersApi.get(id); setExCustomer({ id: c.id, name: c.name }); } catch (e) { fail(e); }
+      try {
+        const c = await customersApi.get(id);
+        setCustomer({ id: c.id, name: c.name, district_id: c.district_id });
+        setForm((f) => ({ ...f, place: f.place || districtName(c.district_id), sign_method: "paper", requisites: fromCustomer(c as unknown as Requisites) }));
+        setChecked(null);
+        setStep(1);
+      } catch (e) { fail(e); }
       return;
     }
     try {
@@ -102,7 +113,9 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     } catch (e) { fail(e); }
   };
 
-  const payload = (): ContractDraft => ({ ...form, type: "by_volume", customer_id: customer!.id, requisites: Object.fromEntries(Object.entries(form.requisites)
+  const payload = (): ContractDraft => ({ ...form, type: isEx ? form.type : "by_volume", customer_id: customer!.id,
+    existing: isEx ? { number: ex.number.trim(), signed_on: ex.signed_on || null, platform: form.sign_method === "electronic" ? ex.platform : null,
+      platform_id: form.sign_method === "electronic" ? ex.platform_id.trim() || null : null } : null, requisites: Object.fromEntries(Object.entries(form.requisites)
     .map(([k, v]) => [k, typeof v === "string" ? v.trim() || null : v])) as unknown as Requisites });
   /** Yopish yoki «Saqlab chiqish»: forma tekshiruvsiz loyihaga yoziladi (keyin «Davom etish»). */
   const close = async () => {
@@ -121,6 +134,14 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   };
   const save = async () => {
     setBusy(true);
+    if (isEx) {
+      try {
+        const c = await contractsApi.createExisting(payload());
+        if (exFile) await contractsApi.uploadScan(c.id, exFile);
+        changed(); toast(t("ex_saved_pending", { n: c.display_number }), "success"); onDone?.(c); onClose();
+      } catch (e) { fail(e); } finally { setBusy(false); }
+      return;
+    }
     try {
       const c = ct ? await contractsApi.update(ct.id, payload()) : await contractsApi.create(payload());
       setCt(c); setStep(2); changed();
@@ -148,14 +169,13 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
         {ct?.status === "returned" && ct.return_comment && <Alert severity="error" sx={{ mb: 2 }} id="ctr-returned">
           <b>{t("ctr_returned_by")}</b> {ct.return_comment}</Alert>}
         {step === 0 && <Stack spacing={2}>
-          <ToggleButtonGroup exclusive fullWidth value={mode} onChange={(_, v) => { if (v) { setMode(v); setExCustomer(null); } }} id="ctr-mode"
+          <ToggleButtonGroup exclusive fullWidth value={mode} onChange={(_, v) => { if (v) { setMode(v); setCustomer(null); } }} id="ctr-mode"
             sx={{ flexWrap: { xs: "wrap", sm: "nowrap" } }}>
             <ToggleButton value="new" data-mode="new">{t("ctr_mode_new")}</ToggleButton>
             <ToggleButton value="existing" data-mode="existing">{t("ctr_mode_existing")}</ToggleButton>
             <ToggleButton value="excel" data-mode="excel">{t("ctr_mode_excel")}</ToggleButton>
           </ToggleButtonGroup>
           {mode === "excel" ? <ExistingImport fail={fail} onDone={() => { changed(); }} />
-            : mode === "existing" && exCustomer ? <ExistingContractForm customer={exCustomer} fail={fail} onDone={() => { changed(); onClose(); }} />
             : <CustomerStep districts={districts} onPick={pickCustomer} fail={fail} />}
         </Stack>}
         {step === 1 && customer && <Stack spacing={2}>
@@ -177,10 +197,17 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
           <Divider />
           <Typography variant="subtitle2" color="text.secondary">{t("ctr_terms")}</Typography>
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "repeat(4, 1fr)" } }}>
-            <TextField size="small" label={t("contract_type")} value={t("ct_by_volume")} InputProps={{ readOnly: true }} />
-            <TextField size="small" name="price" label={t("ctr_price_tariff")} InputProps={{ readOnly: true }} id="ctr-tariff"
-              value={tariff ? fmtMoney(tariff) : tariff === null ? t("ctr_no_tariff") : "…"}
-              error={tariff === null || !!errOf("price")} helperText={errOf("price") ? helper("price") : t("ctr_tariff_hint")} />
+            {isEx
+              ? <TextField select size="small" name="type" label={t("contract_type")} value={form.type} onChange={(e) => set("type", e.target.value as ContractType)}>
+                {EX_TYPES.map((x) => <MenuItem key={x} value={x}>{t(`ct_${x}` as MessageKey)}</MenuItem>)}
+              </TextField>
+              : <TextField size="small" label={t("contract_type")} value={t("ct_by_volume")} InputProps={{ readOnly: true }} />}
+            {isEx && form.type !== "by_volume"
+              ? <TextField size="small" name="price" type="number" label={`${t("ctr_price")} (${t("ctr_vat_incl")})`} value={form.price ?? ""}
+                  onChange={(e) => set("price", e.target.value === "" ? null : Number(e.target.value))} error={!!errOf("price")} helperText={helper("price")} />
+              : <TextField size="small" name="price" label={t("ctr_price_tariff")} InputProps={{ readOnly: true }} id="ctr-tariff"
+                  value={tariff ? fmtMoney(tariff) : tariff === null ? t("ctr_no_tariff") : "…"}
+                  error={tariff === null || !!errOf("price")} helperText={errOf("price") ? helper("price") : t("ctr_tariff_hint")} />}
             <TextField size="small" name="annual_volume" type="number" label={t("ctr_annual_volume")} value={form.annual_volume ?? ""}
               onChange={(e) => set("annual_volume", e.target.value === "" ? null : Number(e.target.value))}
               error={!!errOf("annual_volume")} helperText={helper("annual_volume")} />
@@ -198,6 +225,29 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
               </RadioGroup>
             </Box>
           </Box>
+          {isEx && <>
+            <Divider />
+            <Typography variant="subtitle2" color="text.secondary">{t("ex_meta")}</Typography>
+            <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "repeat(4, 1fr)" } }} id="ex-meta">
+              <TextField size="small" name="ex_number" label={t("contract_no")} value={ex.number} required
+                onChange={(e) => { setEx({ ...ex, number: e.target.value }); setChecked(null); }} error={!!errOf("number")} helperText={helper("number")} />
+              <TextField size="small" name="ex_signed" type="date" label={t("signed_on")} value={ex.signed_on} InputLabelProps={{ shrink: true }}
+                inputProps={{ max: todayIso() }} onChange={(e) => { setEx({ ...ex, signed_on: e.target.value }); setChecked(null); }}
+                error={!!errOf("signed_on")} helperText={helper("signed_on")} />
+              {form.sign_method === "electronic" && <>
+                <TextField size="small" select label={t("ctr_platform")} value={ex.platform} onChange={(e) => setEx({ ...ex, platform: e.target.value })}>
+                  {PLATFORMS.map((p) => <MenuItem key={p} value={p}>{t(`ctr_pl_${p}` as MessageKey)}</MenuItem>)}
+                </TextField>
+                <TextField size="small" name="ex_pid" label={t("ctr_platform_id")} value={ex.platform_id}
+                  onChange={(e) => { setEx({ ...ex, platform_id: e.target.value }); setChecked(null); }} error={!!errOf("platform_id")} helperText={helper("platform_id")} />
+              </>}
+              <Box>
+                <input ref={exFileRef} type="file" hidden accept="application/pdf,image/jpeg,image/png" onChange={(e) => setExFile(e.target.files?.[0] ?? null)} />
+                <Button size="small" onClick={() => exFileRef.current?.click()}>{t("ctr_attach_scan")}</Button>
+                {exFile && <Chip size="small" label={exFile.name} onDelete={() => setExFile(null)} sx={{ ml: 1 }} />}
+              </Box>
+            </Box>
+          </>}
           {checked && <Paper variant="outlined" id="ctr-totals" sx={{ p: 2, borderColor: checked.ok ? STAGE.green.bg : "warning.main", borderWidth: 2 }}>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={3} useFlexGap flexWrap="wrap">
               <Box><Typography variant="caption" color="text.secondary">{t("ctr_qty")}</Typography>
@@ -225,7 +275,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
         {step === 1 && <>
           <Button id="ctr-check" variant="outlined" startIcon={<FactCheckIcon />} onClick={runCheck} disabled={busy}>{t("ctr_check")}</Button>
           <Button id="ctr-save" variant="contained" disableElevation onClick={save} disabled={busy || !checked?.ok}
-            sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>{t(ct ? "ctr_save_changes" : "ctr_save_number")}</Button>
+            sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>{t(isEx ? "ex_send_accountant" : ct ? "ctr_save_changes" : "ctr_save_number")}</Button>
         </>}
       </DialogActions>
     </Dialog>

@@ -51,6 +51,14 @@ class Requisites(BaseModel):
     is_rented: bool = False  # obyekt ijarada (shartnoma 10.3-bandi)
 
 
+class ExistingMeta(BaseModel):
+    """Mavjud (tizimdan oldin imzolangan) shartnoma: qo'shimcha maydonlar."""
+    number: str | None = Field(None, max_length=40)
+    signed_on: date | None = None
+    platform: str | None = Field(None, pattern="^(didox|hujjat|soliq|other)$")
+    platform_id: str | None = Field(None, max_length=40)
+
+
 class ContractDraftIn(BaseModel):
     customer_id: int
     requisites: Requisites
@@ -62,6 +70,7 @@ class ContractDraftIn(BaseModel):
     valid_to: date | None = None
     place: str | None = Field(None, max_length=100)
     sign_method: str = Field("electronic", pattern="^(electronic|paper)$")
+    existing: ExistingMeta | None = None  # bo'lsa — «Mavjud shartnomani kiritish»
 
 
 # --- hisob ---
@@ -136,12 +145,30 @@ async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id:
         errs.append(_err("mfo", "mfo"))
     if r.oked and not re.fullmatch(r"\d{4,5}", r.oked):
         errs.append(_err("oked", "oked"))
-    if body.type != ContractType.by_volume:
+    ex = body.existing
+    if body.type != ContractType.by_volume and not ex:
         errs.append(_err("type", "type_volume_only"))  # yangi shartnoma — faqat kub (ta'rif); reys/oylik — mavjud shartnomani kiritishda
-    # Narx — davlat ta'rifi (shartnoma boshlanish sanasidagi, tuman → viloyat); qo'lda kiritilmaydi
-    body.price = await tariffs.price_for(db, cust.district_id, body.valid_from or local_day(utcnow()))
-    if not body.price:
-        errs.append(_err("price", "no_tariff"))
+    if body.type == ContractType.by_volume:
+        # Narx — davlat ta'rifi (shartnoma boshlanish sanasidagi, tuman → viloyat); qo'lda kiritilmaydi
+        body.price = await tariffs.price_for(db, cust.district_id, body.valid_from or local_day(utcnow()))
+        if not body.price:
+            errs.append(_err("price", "no_tariff"))
+    elif not body.price or body.price <= 0:
+        errs.append(_err("price", "required"))
+    if ex:
+        num, pid = (ex.number or "").strip(), (ex.platform_id or "").strip() or None
+        if not num:
+            errs.append(_err("number", "required"))
+        elif (await db.execute(select(Contract.id).where(Contract.number == num, Contract.id != (own_id or -1)))).first():
+            errs.append(_err("number", "number_taken"))
+        if not ex.signed_on:
+            errs.append(_err("signed_on", "required"))
+        elif ex.signed_on > local_day(utcnow()):
+            errs.append(_err("signed_on", "future"))
+        if body.sign_method == "electronic" and not pid:
+            errs.append(_err("platform_id", "required"))
+        if pid and (await db.execute(select(Contract.id).where(Contract.platform_id == pid, Contract.id != (own_id or -1)))).first():
+            errs.append(_err("platform_id", "platform_id_taken"))
     if body.type == ContractType.by_volume and not (body.annual_volume and body.annual_volume > 0):
         errs.append(_err("annual_volume", "required"))
     if body.type == ContractType.per_trip and not body.annual_trips:
@@ -220,6 +247,37 @@ async def create(db: AsyncSession, actor: User, body: ContractDraftIn) -> Contra
     return await get(db, actor, ct.id)
 
 
+async def create_existing(db: AsyncSession, storage: Storage, actor: User, body: ContractDraftIn,
+                          file: tuple[bytes, str, str] | None = None) -> Contract:
+    """Mavjud (tizimdan oldin imzolangan) shartnoma: yangi shartnoma bilan bir xil to'liq ma'lumot (rekvizitlar, shartlar)
+    + raqam, imzolangan sana, platforma ID, skan. Buxgalter tasdig'iga tushadi («Tasdiq kutilmoqda»), faol."""
+    if not body.existing:
+        raise invalid("existing_required", "Mavjud shartnoma ma'lumotlari yo'q")
+    cust, errs = await validate(db, actor, body)
+    _raise(errs)
+    ex = body.existing
+    pid = (ex.platform_id or "").strip() or None
+    ct = Contract(customer_id=cust.id, number=(ex.number or "").strip(), status="signed", is_active=True, created_by_id=actor.id, events=[],
+                  type=body.type, valid_from=body.valid_from, valid_to=body.valid_to, source="manual", signed_on=ex.signed_on,
+                  signed_at=utcnow(), platform=(ex.platform or "other") if pid else None, platform_id=pid)
+    _apply(cust, ct, body)
+    _event(ct, actor, "imported")
+    db.add(ct)
+    await db.flush()
+    if file:
+        await _put_scan(storage, ct, file)
+    log(db, ct, cust, actor, "act_contract_imported", f"Mavjud shartnoma kiritildi (tasdiqqa): {ct.display_number} «{cust.name}»")
+    await db.commit()
+    return await get(db, actor, ct.id)
+
+
+def log(db: AsyncSession, ct: Contract, cust: Customer, actor: User, kind: str, text: str, comment: str | None = None) -> None:
+    from app.services import situation
+    situation.activity(db, kind, text + (f" — {comment}" if comment else ""),
+                       params={"contract": ct.display_number, "customer": cust.name, "comment": comment},
+                       district_id=cust.district_id, actor_id=actor.id, ref=("customer", cust.id))
+
+
 async def _own(db: AsyncSession, actor: User, contract_id: int, lock: bool = False, fresh: bool = False) -> Contract:
     q = select(Contract).where(Contract.id == contract_id).options(selectinload(Contract.customer), selectinload(Contract.events))
     if fresh:  # commit'dan keyin: korxona rekvizitlari va tarix yangidan o'qiladi (actor obyekti tegilmaydi)
@@ -249,6 +307,7 @@ async def update(db: AsyncSession, actor: User, contract_id: int, body: Contract
         prov = await _provider(db, cust.district_id)
         ct.number = await next_number(db, prov.code if prov else "SH", body.valid_from.year)
     _event(ct, actor, "edited")
+    log(db, ct, cust, actor, "act_contract_saved", f"Shartnoma ma'lumotlari saqlandi: {ct.display_number} «{cust.name}»")
     await db.commit()
     return await get(db, actor, ct.id)
 
@@ -264,6 +323,8 @@ async def start(db: AsyncSession, actor: User, customer_id: int) -> Contract:
                   type=ContractType.by_volume, valid_from=today, valid_to=date(today.year, 12, 31))
     _event(ct, actor, "created")
     db.add(ct)
+    await db.flush()
+    log(db, ct, cust, actor, "act_contract_started", f"Yangi shartnoma boshlandi: «{cust.name}»")
     await db.commit()
     return await get(db, actor, ct.id)
 
@@ -315,6 +376,8 @@ async def sign(db: AsyncSession, storage: Storage, actor: User, contract_id: int
     ct.platform, ct.platform_id = (platform if method == "electronic" else None), (pid if method == "electronic" else None)
     ct.signed_at, ct.return_comment = utcnow(), None
     _event(ct, actor, "resubmitted" if was_returned else "signed")
+    log(db, ct, ct.customer, actor, "act_contract_signed", f"Shartnoma imzolandi, buxgalteriyaga yuborildi: {ct.display_number} «{ct.customer.name}»"
+        + (" (qayta)" if was_returned else ""))
     await db.commit()
     return await get(db, actor, ct.id)
 
@@ -344,6 +407,7 @@ async def approve(db: AsyncSession, actor: User, contract_id: int) -> Contract:
         raise conflict("contract_not_signed", "Faqat imzolangan (tasdiq kutayotgan) shartnoma tasdiqlanadi")
     ct.status, ct.approved_at, ct.approved_by_id = "approved", utcnow(), actor.id
     _event(ct, actor, "approved")
+    log(db, ct, ct.customer, actor, "act_contract_approved", f"Buxgalter tasdiqladi: {ct.display_number} «{ct.customer.name}»")
     await db.commit()
     return await get(db, actor, ct.id)
 
@@ -354,6 +418,7 @@ async def return_(db: AsyncSession, actor: User, contract_id: int, comment: str)
         raise conflict("contract_not_signed", "Faqat tasdiq kutayotgan shartnoma qaytariladi")
     ct.status, ct.return_comment = "returned", comment.strip()
     _event(ct, actor, "returned", comment.strip())
+    log(db, ct, ct.customer, actor, "act_contract_returned", f"Buxgalter qaytardi: {ct.display_number} «{ct.customer.name}»", comment.strip())
     await db.commit()
     return await get(db, actor, ct.id)
 
@@ -448,6 +513,7 @@ def context(ct: Contract, cust: Customer, prov: Provider | None) -> dict:
         "customer_bank": _blank(cust.bank), "customer_mfo": _blank(cust.mfo),
         "object_address": _blank(cust.address or cust.legal_address), "cadastre": _blank(cust.cadastre),
         "ownership": "ijara" if cust.is_rented else "mulk",
+        "ownership_text": "ijara huquqi asosida foydalanishga berilgan" if cust.is_rented else "mulk huquqi asosida tegishli",
         "qty": f"{t['qty']:,.{qty_dec}f}".replace(",", " "), "unit": t["unit"],
         "unit_net": _fmt(t["unit_net"]), "net": _fmt(t["net"]), "vat": _fmt(t["vat"]), "total": _fmt(t["total"]),
         "total_words": money_words(t["total"]), "price": _fmt(t["price"], 0), "price_words": money_words(t["price"]).split(" so‘m")[0],

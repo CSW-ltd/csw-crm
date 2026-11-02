@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import forbidden, invalid, not_found
 from app.models import District, Region, Tariff, User
 from app.models.enums import Role
-from app.services import access
+from app.services import access, situation
 
 
 class TariffBook:
@@ -55,6 +55,8 @@ def _can_edit(user: User, region: Region, district: District | None) -> None:
         return
     if user.role != Role.manager or district is None:
         raise forbidden("Viloyat ta'rifini faqat admin o'zgartiradi")
+    if not user.can("settings.tariff"):
+        raise forbidden("Ta'rifni belgilash huquqi yo'q (admin huquqlar bo'limida yoqadi)")
     access.check_scope(user, district.id)
     if region.tariff_locked or district.tariff_locked:
         raise forbidden("Admin bu hudud ta'rifini o'zgartirishni yopib qo'ygan")
@@ -92,7 +94,8 @@ async def overview(db: AsyncSession, user: User, today: date) -> dict:
                 "own_price": float(op) if (op := tb._at(tb.by_district.get(d.id, []), today)) is not None else None,
                 "price": float(p) if (p := tb.price(d.id, today)) is not None else None,
                 "upcoming": upcoming(tb.by_district.get(d.id, [])),
-                "can_edit": user.role == Role.admin or (user.role == Role.manager and not r.tariff_locked and not d.tariff_locked),
+                "can_edit": user.role == Role.admin or (user.role == Role.manager and user.can("settings.tariff")
+                                                        and not r.tariff_locked and not d.tariff_locked),
                 "history": hist(r.id, d.id),
             } for d in ds],
         })
@@ -113,6 +116,9 @@ async def set_price(db: AsyncSession, user: User, region_id: int | None, distric
     t = Tariff(region_id=region.id, district_id=district.id if district else None, price=price, valid_from=valid_from,
                note=(note or "").strip() or None, created_by_id=user.id)
     db.add(t)
+    situation.activity(db, "act_tariff_set", f"Ta'rif: {(district or region).name} — {price} so'm/m³, {valid_from} dan"
+                       + (f" ({t.note})" if t.note else ""), params={"place": (district or region).name, "price": float(price),
+                       "from": str(valid_from), "note": t.note}, district_id=district.id if district else None, actor_id=user.id)
     await db.commit()
     return t
 
@@ -124,6 +130,8 @@ async def set_lock(db: AsyncSession, user: User, region_id: int | None, district
     if not obj:
         raise not_found("district" if district_id else "region")
     obj.tariff_locked = locked
+    situation.activity(db, "act_tariff_lock", f"Ta'rif managerga {'yopildi' if locked else 'ochildi'}: {obj.name}",
+                       params={"place": obj.name, "locked": locked}, district_id=district_id, actor_id=user.id)
     await db.commit()
 
 

@@ -7,10 +7,27 @@ import { useI18n } from "@/i18n/I18nContext";
 import { confirmDialog, toast } from "@/lib/alerts";
 import type { District } from "@/types";
 import type { RefData } from "./AdminHome";
+import { TariffsTab } from "./TariffsTab";
 
 type Form = { id?: number; name: string; region_id: number | "" };
 
-export function DistrictsTab({ regions, districts, reload, canWrite }: RefData) {
+export function DistrictsTab(ref: RefData) {
+  // Admin: tumanlar ro'yxati va ularning ta'riflari (1 m³) shu bo'limda
+  return (
+    <Stack spacing={2}>
+      <DistrictsList {...ref} />
+      <TariffsTitle />
+      <TariffsTab {...ref} />
+    </Stack>
+  );
+}
+
+function TariffsTitle() {
+  const { t } = useI18n();
+  return <Typography variant="h6" sx={{ pt: 1 }} id="tariffs-title">{t("tab_tariffs")}</Typography>;
+}
+
+function DistrictsList({ regions, districts, reload, canWrite }: RefData) {
   const { t, tErr } = useI18n();
   const [form, setForm] = useState<Form | null>(null);
   const [busy, setBusy] = useState(false);

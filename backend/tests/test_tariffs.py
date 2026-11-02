@@ -99,29 +99,45 @@ async def test_draft_lifecycle_and_rented(world, client_factory, sessionmaker):
     assert r["number"].startswith("BTE-") and r["draft"] is None and r["customer"]["is_rented"] and r["price"] == 84000
     dx = await legal.get(f"/api/v1/contracts/{ct['id']}/document", params={"format": "docx"})
     text = "\n".join(p.text for p in Document(io.BytesIO(dx.content)).paragraphs)
-    assert "ijara huquqi asosida" in text and "kadastr raqami" not in text
+    assert "ijara huquqi asosida foydalanishga berilgan" in text and "kadastr raqami" not in text
 
 
-async def test_existing_contract_form_and_excel(world, client_factory, sessionmaker):
-    legal = await client_factory("legal")
+async def test_existing_contract_full_data_and_accountant_approval(world, client_factory, sessionmaker):
+    from app.models import Tariff
+    async with sessionmaker() as s_:
+        for rid in await _region_ids(sessionmaker, world):
+            s_.add(Tariff(region_id=rid, price=84000, valid_from=date(T.year - 1, 1, 1)))
+        await s_.commit()
+    await _setup(world, sessionmaker)  # buxgalter
+    legal, acc = await client_factory("legal"), await client_factory("buxgalter")
     cid = (await legal.post("/api/v1/customers", json={"name": "Eski MChJ", "district_id": world["districts"]["a"]})).json()["id"]
-    one = {"customer_id": cid, "number": "721", "platform": "didox", "platform_id": "e0f94e10", "type": "monthly", "price": 500000,
-           "signed_on": "2026-03-02", "valid_from": "2026-03-01", "valid_to": "2026-12-31", "sign_method": "electronic"}
-    r = await legal.post("/api/v1/contracts/existing", json=one)
+    meta = {"number": "721", "signed_on": "2026-03-02", "platform": "didox", "platform_id": "e0f94e10"}
+    full = body(cid, type="monthly", price=500000, valid_from="2026-03-01", valid_to="2026-12-31", existing=meta)
+    # Rekvizitlar yangi shartnoma bilan bir xil majburiy
+    r = await legal.post("/api/v1/contracts/existing", json={**full, "requisites": {"name": "Eski MChJ", "stir": "12"}})
+    assert r.json()["error"]["code"] == "contract_invalid"
+    r = await legal.post("/api/v1/contracts/existing", json=full)
     assert r.status_code == 201, r.text
     c = r.json()
-    assert c["status"] == "approved" and c["is_active"] and c["source"] == "manual" and c["display_number"] == "e0f94e10"
-    assert (await legal.post("/api/v1/contracts/existing", json={**one, "platform_id": None})).json()["error"]["code"] == "contract_number_taken"
+    assert c["status"] == "signed" and c["is_active"] and c["source"] == "manual" and c["display_number"] == "e0f94e10"
+    assert c["customer"]["account"] == REQ["account"] and [e["action"] for e in c["events"]] == ["imported"]
+    dup = (await legal.post("/api/v1/contracts/existing", json={**full, "existing": {**meta, "platform_id": "x2"}})).json()
+    assert {"field": "number", "code": "number_taken"} in dup["error"]["details"]["errors"]
+    # Buxgalter navbatida — tasdiqlagach «Tasdiqlangan»
+    assert any(x["id"] == c["id"] for x in (await acc.get("/api/v1/contracts", params={"status": "signed"})).json()["items"])
+    assert (await acc.post(f"/api/v1/contracts/{c['id']}/approve")).json()["status"] == "approved"
     assert (await legal.post(f"/api/v1/contracts/{c['id']}/scan-upload", files={"file": ("s.pdf", b"%PDF-1", "application/pdf")})).json()["has_scan"]
-    # Excel: shablon → to'ldirish → sinov → import
+    # Excel: rekvizitlar majburiy, har bir qator — buxgalter navbatiga
     tpl = await legal.get("/api/v1/contracts/existing/template")
     wb = load_workbook(io.BytesIO(tpl.content))
     ws = wb.active
     rows = [["Asaka tumani", "Yangi Import MChJ", "301112223", "Dir", "90 111 22 33", "Asaka", "Asaka", "Bank", "00873", "20208000900123456001",
              "56290", "IMP-1", "", "kub", "", "50", "01.02.2026", "01.02.2026", "31.12.2026"],
-            ["Asaka tumani", "Ikkinchi MChJ", "12345", "", "", "", "", "", "", "", "", "IMP-2", "", "kub", "", "", "01.02.2026", "01.02.2026", "31.12.2026"],
+            ["Asaka tumani", "Ikkinchi MChJ", "301112224", "", "90 111 22 34", "A", "A", "B", "00873", "20208000900123456002", "", "IMP-2", "",
+             "kub", "", "10", "01.02.2026", "01.02.2026", "31.12.2026"],
             ["Yo'q tuman", "X MChJ", "", "", "", "", "", "", "", "", "", "IMP-3", "", "kub", "", "", "", "01.02.2026", "31.12.2026"],
-            ["Asaka tumani", "Eski MChJ", "", "", "", "", "", "", "", "", "", "IMP-4", "", "reys", "120000", "", "", "01.02.2026", "31.12.2026"]]
+            ["Asaka tumani", "Uchinchi MChJ", "301112225", "D", "90 111 22 35", "A", "A", "B", "00873", "20208000900123456003", "", "IMP-4", "",
+             "kub", "", "", "01.02.2026", "01.02.2026", "31.12.2026"]]
     for r_ in rows:
         ws.append(r_)
     buf = io.BytesIO(); wb.save(buf)
@@ -129,8 +145,57 @@ async def test_existing_contract_form_and_excel(world, client_factory, sessionma
                                 files={"file": ("s.xlsx", buf.getvalue(), "application/octet-stream")})
     dry = (await up(True)).json()
     errs = {e["value"]: e["error"] for e in dry["errors"]}
-    assert dry["ok"] == 1 and errs == {"IMP-2": "stir", "IMP-3": "district_not_found", "IMP-4": "overlap"}, dry
-    res = (await up(False)).json()
-    assert res["created"] == 1
-    found = (await legal.get("/api/v1/contracts", params={"q": "IMP-1"})).json()["items"]
-    assert found[0]["status"] == "approved" and found[0]["source"] == "import" and found[0]["customer"]["account"] == "20208000900123456001"
+    assert dry["ok"] == 1 and errs == {"IMP-2": "director_required", "IMP-3": "district_not_found", "IMP-4": "volume_required"}, dry
+    assert (await up(False)).json()["created"] == 1
+    found = (await acc.get("/api/v1/contracts", params={"q": "IMP-1"})).json()["items"]
+    assert found[0]["status"] == "signed" and found[0]["source"] == "import" and found[0]["price"] == 84000
+
+
+async def test_reassign_while_printing_and_activity_log(world, client_factory, sessionmaker):
+    from tests.helpers import schedule_driver
+    gps, driver, driver2 = await client_factory("gps"), await client_factory("driver"), await client_factory("driver2")
+    await schedule_driver(gps, driver, world["users"]["driver"], world["vehicles"]["v1"])
+    await schedule_driver(gps, driver2, world["users"]["driver2"], world["vehicles"]["v2"])
+    rid = world["requests"][0]
+    r = (await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v1"]})).json()
+    fid, num, naryad = r["order_form"]["id"], r["order_form"]["number"], r["naryad_no"]
+    await gps.post(f"/api/v1/order-forms/{fid}/print")
+    # Printerdan chiqqani tasdiqlanmaguncha — boshqa mashinaga qayta biriktirish; raqam o'zgarmaydi
+    r2 = (await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v2"]})).json()
+    assert r2["status"] == "printing" and r2["vehicle"]["plate"] == "60 102 AB" and r2["order_form"]["number"] == num and r2["naryad_no"] == naryad
+    paper = (await gps.get(f"/api/v1/order-forms/{fid}")).json()
+    assert paper["needs_reprint"] and paper["vehicle"]["plate"] == "60 102 AB"
+    assert (await gps.post(f"/api/v1/order-forms/{fid}/confirm-print")).json()["error"]["code"] == "not_printed"
+    await gps.post(f"/api/v1/order-forms/{fid}/print")
+    assert (await gps.post(f"/api/v1/order-forms/{fid}/confirm-print")).json()["status"] == "assigned"
+    assert rid in [x["id"] for x in (await driver2.get("/api/v1/driver/tasks")).json()]
+    assert rid not in [x["id"] for x in (await driver.get("/api/v1/driver/tasks")).json()]
+    # Tasdiqlangandan keyin qayta biriktirib bo'lmaydi
+    assert (await gps.post(f"/api/v1/gps/requests/{rid}/assign", json={"vehicle_id": world["vehicles"]["v1"]})).status_code == 409
+    # Faoliyat jurnali: qo'ng'iroqcha soniga kirmaydi; turi bo'yicha PDF va ZIP
+    admin = await client_factory("admin")
+    page = (await admin.get("/api/v1/situation", params={"level": "activity"})).json()
+    kinds = [e["kind"] for e in page["items"]]
+    assert {"act_assigned", "act_reassigned", "act_form_printed", "act_print_confirmed"} <= set(kinds)
+    ev = next(e for e in page["items"] if e["kind"] == "act_reassigned")
+    assert ev["actor_name"] == "GPS" and ev["district_id"] == world["districts"]["a"] and "60 101 AB" in ev["message"]
+    assert (await admin.get("/api/v1/situation/unread")).json()["unread"] == 0
+    pdf = await admin.get("/api/v1/situation/export", params={"kind": "act_reassigned"})
+    assert pdf.status_code == 200 and pdf.content[:4] == b"%PDF"
+    z = await admin.get("/api/v1/situation/export", params={"level": "activity"})
+    import zipfile
+    names = zipfile.ZipFile(io.BytesIO(z.content)).namelist()
+    assert "act_reassigned.pdf" in names and "act_print_confirmed.pdf" in names
+
+
+async def test_manager_tariff_permission_toggle(world, client_factory, sessionmaker):
+    admin = await client_factory("admin")
+    uid, mgr = await _manager(world, client_factory, admin)
+    a = world["districts"]["a"]
+    assert (await mgr.post("/api/v1/tariffs", json={"district_id": a, "price": 85000, "valid_from": str(T)})).status_code == 201
+    perms = (await admin.get(f"/api/v1/admin/users/{uid}/access")).json()["permissions"]
+    assert "settings.tariff" in perms
+    await admin.put(f"/api/v1/admin/users/{uid}/access", json={"permissions": [p for p in perms if p != "settings.tariff"]})
+    assert (await mgr.post("/api/v1/tariffs", json={"district_id": a, "price": 86000, "valid_from": str(T)})).status_code == 403
+    d = next(x for r in (await mgr.get("/api/v1/tariffs")).json()["regions"] for x in r["districts"] if x["district_id"] == a)
+    assert not d["can_edit"]

@@ -29,7 +29,10 @@ export function I18nProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const t = useCallback<T>((key, vars) => {
-    const [uz, ru, en] = MESSAGES[key];
+    // Tarjima topilmasa — sahifa yiqilmasin, kalitning o'zi ko'rsatiladi
+    const entry = MESSAGES[key] as readonly [string, string, string] | undefined;
+    if (!entry) return String(key);
+    const [uz, ru, en] = entry;
     let s: string = lang === "ru" ? ru : lang === "en" ? en : uz;
     if (lang === "cy") s = toCyrillic(s);
     if (vars) for (const [k, v] of Object.entries(vars)) s = s.replace(`{${k}}`, String(v));

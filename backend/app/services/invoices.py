@@ -13,7 +13,7 @@ from app.core.config import get_settings, public_url
 from app.core.errors import conflict, not_found
 from app.db.base import utcnow
 from app.models import Customer, District, Invoice, InvoiceLine, Provider, User
-from app.services import access, billing, sms
+from app.services import access, billing, situation, sms
 from app.services.billing import ZERO, money, month_bounds
 
 
@@ -89,10 +89,16 @@ async def generate(db: AsyncSession, actor: User, month: date) -> dict:
             inv.lines.append(InvoiceLine(kind=x["kind"], request_id=x["request_id"], day=x["day"], description=x["description"][:255],
                                          qty=x["qty"], unit=x["unit"], price=x["price"], amount=x["amount"]))
         await db.flush()
+    situation.activity(db, "act_invoices_generated", f"Oy yopildi: {start.strftime('%m.%Y')} — yaratildi {created}, yangilandi {updated}",
+                       params={"month": str(start), "created": created, "updated": updated}, actor_id=actor.id)
     await db.commit()
     # Imzolangan, lekin buxgalter tasdiqlamagan shartnomalar bo'yicha varaqalar fakturaga kirmadi — ogohlantirish
     pending = sum(1 for c in custs for g in led.greens[c.id] if g.pending and start <= g.day <= end)
     return {"month": start, "created": created, "updated": updated, "skipped_sent": skipped_sent, "pending_forms": pending}
+
+
+def start_of(month: date) -> str:
+    return month_bounds(month)[0].strftime("%m.%Y")
 
 
 def link(inv: Invoice) -> str:
@@ -113,6 +119,8 @@ async def send_all(db: AsyncSession, actor: User, month: date) -> dict:
             sent += 1
         else:
             no_phone += 1
+    situation.activity(db, "act_invoices_sent", f"Schyot-fakturalar jo'natildi: {len(invs)} ta ({start_of(month)})",
+                       params={"count": len(invs), "sms": sent, "month": start_of(month)}, actor_id=actor.id)
     await db.commit()
     return {"sent": sent, "no_phone": no_phone, "total": len(invs)}
 
