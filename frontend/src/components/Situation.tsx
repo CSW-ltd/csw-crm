@@ -27,7 +27,7 @@ export function useSituationText() {
     for (const k of ["added", "removed"]) {
       if (typeof p[k] === "string" && p[k] !== "—") p[k] = (p[k] as string).split(", ").map((code) => {
         const [m, a] = code.split(".");
-        return `${t(`m_${m}` as MessageKey)}: ${t(`a_${a}` as MessageKey)}`;
+        return `${t(`m_${m}` as MessageKey)}: ${t((`a_${m}_${a}` in MESSAGES ? `a_${m}_${a}` : `a_${a}`) as MessageKey)}`;
       }).join(", ");
     }
     let s = t(key, p);

@@ -1,7 +1,7 @@
 """Mavjud (qo'lda tuzilgan) shartnomalarni Excel orqali kiritish (avval sinov). Bittalab forma — contracts.create_existing.
 
-Yangi shartnoma bilan bir xil to'liq ma'lumot (rekvizitlar majburiy); har bir shartnoma «Tasdiq kutilmoqda» holatida
-buxgalter navbatiga tushadi va bittalab tasdiqlanadi. source = import, tarixda «imported».
+Yangi shartnoma bilan bir xil to'liq ma'lumot (rekvizitlar majburiy). Har bir shartnoma «Tugallanmagan»da asl PDF'ini kutadi;
+PDF yuklangach buxgalter navbatiga tushadi va bittalab tasdiqlanadi. source = import, tarixda «imported».
 Korxona: tuman + STIR (yoki tuman + nom) bo'yicha topiladi, topilmasa yaratiladi. Kub turidagi shartnomada hisob — ta'rif bo'yicha.
 """
 import io
@@ -48,10 +48,9 @@ async def _check(db: AsyncSession, cust: Customer, number: str, platform_id: str
 
 def _make(cust_id: int, actor: User, number: str, platform: str | None, platform_id: str | None, ctype: ContractType, price, volume,
           signed_on: date, vf: date, vt: date, method: str, source: str) -> Contract:
-    now = utcnow()
     return Contract(customer_id=cust_id, number=number, platform=platform if platform_id else None, platform_id=platform_id or None,
                     type=ctype, price=price, annual_volume=volume, signed_on=signed_on, valid_from=vf, valid_to=vt, sign_method=method,
-                    status="signed", is_active=True, signed_at=now, created_by_id=actor.id,
+                    status="draft", is_active=False, created_by_id=actor.id,  # PDF yuklangach — buxgalter tasdig'iga
                     source=source, events=[ContractEvent(actor_id=actor.id, action="imported")])
 
 

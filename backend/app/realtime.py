@@ -32,6 +32,10 @@ async def connect(sid, environ, auth):
         await sio.enter_room(sid, "managers")
     if role == "admin":
         await sio.enter_room(sid, "admins")  # Vaziyat paneli
+    if role in ("manager", "accountant"):
+        # Vaziyat paneli: faqat o'z tumanlari hodisalari jonli keladi
+        for d in await _user_districts(uid):
+            await sio.enter_room(sid, f"sit:{d}")
     elif role == "gps":
         # Tuman foydalanuvchining o'zidan olinadi (mijoz yubormaydi) — yangi qizil karta jonli tushishi uchun
         district = await _user_district(uid)
@@ -56,6 +60,17 @@ async def _user_district(uid) -> int | None:
         return None
 
 
+async def _user_districts(uid) -> list[int]:
+    from sqlalchemy import select
+    from app.db.session import SessionLocal
+    from app.models import UserDistrict
+    try:
+        async with SessionLocal() as db:
+            return list((await db.execute(select(UserDistrict.district_id).where(UserDistrict.user_id == int(uid)))).scalars())
+    except Exception:  # noqa: BLE001
+        return []
+
+
 async def emit_request_updated(payload: dict) -> None:
     rooms = ["managers", "operators", "legal", "gps:all", f"gps:{payload['district_id']}"]
     if payload.get("driver_id"):
@@ -68,8 +83,9 @@ async def emit_driver_location(payload: dict) -> None:
 
 
 async def emit_situation(payload: dict) -> None:
-    """Vaziyat paneli: faqat admin."""
-    await sio.emit("situation:new", payload, room="admins")
+    """Vaziyat paneli: admin — hammasi; manager va buxgalter — o'z tumanlari (faoliyat jurnali jonli yuborilmaydi)."""
+    rooms = ["admins"] + ([f"sit:{payload['district_id']}"] if payload.get("district_id") else [])
+    await sio.emit("situation:new", payload, room=rooms)
 
 
 async def emit_appeal_updated(payload: dict) -> None:

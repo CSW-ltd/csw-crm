@@ -42,7 +42,8 @@ export function AdminHome() {
   // Legal va buxgalter uchun «Korxonalar» — faqat statistika (debitor/kreditor); admin/manager — korxonalar bazasi
   const statsOnly = role === "legal" || role === "accountant";
   const tabs = TABS.filter((x) => (x === "companies" ? statsOnly : x === "customers" ? !statsOnly : true))
-    .filter((x) => TAB_PERM[x] === "admin" ? role === "admin" : (TAB_PERM[x] as string[]).some(can));
+    .filter((x) => x === "situation" ? role === "admin" || role === "manager" || role === "accountant"  // o'z tumanlari
+      : TAB_PERM[x] === "admin" ? role === "admin" : (TAB_PERM[x] as string[]).some(can));
   const [newContract, setNewContract] = useState(false);
   const loc = useLocation();
   const nav = useNavigate();

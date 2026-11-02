@@ -11,18 +11,25 @@ from app.api.deps import DB, require_roles
 from app.models import SituationEvent, SituationRead, User
 from app.models.enums import Role, SituationLevel
 from app.schemas import SituationOut, SituationPage, SituationReadIn
+from app.services import access
 
 router = APIRouter(prefix="/situation", tags=["situation"])
-Viewer = Depends(require_roles(Role.admin))
+# Admin — hammasi; manager va buxgalter — faqat o'z tumanlari hodisalari (tumansiz hodisalar ko'rinmaydi)
+Viewer = Depends(require_roles(Role.admin, Role.manager, Role.accountant))
+
+
+def _scope(user: User) -> list:
+    s = access.scope(user)
+    return [] if s is None else [SituationEvent.district_id.in_(s or {-1})]
 
 
 async def _last_read(db: AsyncSession, user_id: int) -> int:
     return (await db.execute(select(SituationRead.last_read_id).where(SituationRead.user_id == user_id))).scalar() or 0
 
 
-async def _unread(db: AsyncSession, last_read: int) -> int:
+async def _unread(db: AsyncSession, last_read: int, user: User) -> int:
     return (await db.execute(select(func.count()).select_from(SituationEvent).where(
-        SituationEvent.id > last_read, SituationEvent.level != SituationLevel.activity))).scalar_one()
+        SituationEvent.id > last_read, SituationEvent.level != SituationLevel.activity, *_scope(user)))).scalar_one()
 
 
 @router.get("", response_model=SituationPage)
@@ -30,7 +37,7 @@ async def events(level: SituationLevel | None = None, kind: str | None = Query(N
                  date_from: date | None = None, date_to: date | None = None, unread: bool = False,
                  limit: int = Query(50, ge=1, le=200), offset: int = Query(0, ge=0), user: User = Viewer, db: AsyncSession = DB):
     last = await _last_read(db, user.id)
-    cond = []
+    cond = _scope(user)
     if level:
         cond.append(SituationEvent.level == level)
     if kind:
@@ -54,7 +61,7 @@ async def events(level: SituationLevel | None = None, kind: str | None = Query(N
                           district_id=e.district_id, actor_id=e.actor_id, actor_name=name, ref_type=e.ref_type, ref_id=e.ref_id,
                           created_at=e.created_at, resolved=e.kind == "staff_pending" and e.ref_id not in still_pending)
              for e, name in rows]
-    return SituationPage(items=items, total=total, unread=await _unread(db, last), last_read_id=last)
+    return SituationPage(items=items, total=total, unread=await _unread(db, last, user), last_read_id=last)
 
 
 @router.get("/export")
@@ -63,7 +70,7 @@ async def export(kind: str | None = Query(None, max_length=40), level: Situation
     """Jurnal: tur tanlangan bo'lsa — shu tur PDF; aks holda ZIP (har bir tur alohida PDF)."""
     from app.models import District
     from app.services import situation_export as sx
-    cond = []
+    cond = _scope(user)
     if kind:
         cond.append(SituationEvent.kind == kind)
     if level:
@@ -92,7 +99,7 @@ async def export(kind: str | None = Query(None, max_length=40), level: Situation
 
 @router.get("/unread")
 async def unread_count(user: User = Viewer, db: AsyncSession = DB) -> dict:
-    return {"unread": await _unread(db, await _last_read(db, user.id))}
+    return {"unread": await _unread(db, await _last_read(db, user.id), user)}
 
 
 @router.post("/read")
@@ -106,4 +113,4 @@ async def mark_read(body: SituationReadIn, user: User = Viewer, db: AsyncSession
         row.last_read_id = up_to
     await db.commit()
     last = await _last_read(db, user.id)
-    return {"unread": await _unread(db, last), "last_read_id": last}
+    return {"unread": await _unread(db, last, user), "last_read_id": last}

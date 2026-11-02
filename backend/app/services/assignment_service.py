@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.errors import conflict, forbidden, invalid, not_found
 from app.db.base import utcnow
 from app.models import Request, User, Vehicle
-from app.models.enums import RequestStatus
+from app.models.enums import RequestStatus, SituationLevel
 from app.repositories import requests as req_repo
 from app.services import access, events, naryad, order_forms, schedule, situation
 
@@ -44,12 +44,18 @@ async def assign(db: AsyncSession, gps_user: User, request_id: int, vehicle_id: 
     form = await order_forms.create_for(db, req, gps_user)
     note = f"{vehicle.plate} · {plan.driver.full_name} · varaqa {form.number} — chop etilishi kutilmoqda"
     events.record(db, req, gps_user.id, f"qayta biriktirildi ({old_plate} → {vehicle.plate}): {note}" if reassign else note)
-    situation.activity(db, "act_reassigned" if reassign else "act_assigned",
-                       (f"Qayta biriktirildi: {req.number} {old_plate} → {vehicle.plate}" if reassign
-                        else f"Mashina biriktirildi: {req.number} → {vehicle.plate} · {plan.driver.full_name}") + f", varaqa {form.number}",
-                       params={"number": req.number, "plate": vehicle.plate, "old_plate": old_plate, "driver": plan.driver.full_name,
-                               "form": form.number}, district_id=req.district_id, actor_id=gps_user.id, ref=("request", req.id))
-    await db.commit()
+    if reassign:
+        # Managerga (o'z tumani) va adminga jonli ogohlantirish
+        situation.add(db, SituationLevel.warning, "request_reassigned",
+                      f"Qayta biriktirildi: {req.number} {old_plate} → {vehicle.plate} · {plan.driver.full_name}, varaqa {form.number}",
+                      params={"number": req.number, "plate": vehicle.plate, "old_plate": old_plate, "driver": plan.driver.full_name,
+                              "form": form.number, "gps": gps_user.full_name}, district_id=req.district_id, actor_id=gps_user.id,
+                      ref=("request", req.id))
+    else:
+        situation.activity(db, "act_assigned", f"Mashina biriktirildi: {req.number} → {vehicle.plate} · {plan.driver.full_name}, varaqa {form.number}",
+                           params={"number": req.number, "plate": vehicle.plate, "driver": plan.driver.full_name, "form": form.number},
+                           district_id=req.district_id, actor_id=gps_user.id, ref=("request", req.id))
+    await situation.commit(db)
     await events.broadcast(req)
     return await req_repo.by_id(db, req.id)
 

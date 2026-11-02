@@ -32,7 +32,7 @@ from app.services.storage import Storage
 VAT = Decimal("12")
 LIVE = ("signed", "returned", "approved")  # faol shartnoma holatlari
 PLATFORMS = ("didox", "hujjat", "soliq", "other")
-SCAN_TYPES = {"application/pdf": "pdf", "image/jpeg": "jpg", "image/png": "png"}
+SCAN_TYPES = {"application/pdf": "pdf"}  # imzolangan nusxa / asl hujjat — faqat PDF
 NEW_BADGE_DAYS = 30  # GPS kartasida «Yangi shartnoma» belgisi
 
 
@@ -250,25 +250,39 @@ async def create(db: AsyncSession, actor: User, body: ContractDraftIn) -> Contra
 async def create_existing(db: AsyncSession, storage: Storage, actor: User, body: ContractDraftIn,
                           file: tuple[bytes, str, str] | None = None) -> Contract:
     """Mavjud (tizimdan oldin imzolangan) shartnoma: yangi shartnoma bilan bir xil to'liq ma'lumot (rekvizitlar, shartlar)
-    + raqam, imzolangan sana, platforma ID, skan. Buxgalter tasdig'iga tushadi («Tasdiq kutilmoqda»), faol."""
+    + raqam, imzolangan sana, platforma ID. Asl hujjatning PDF'i majburiy: PDF yuklanmaguncha «Tugallanmagan» (skan kutilmoqda),
+    yuklangach buxgalter tasdig'iga («Tasdiq kutilmoqda», faol)."""
     if not body.existing:
         raise invalid("existing_required", "Mavjud shartnoma ma'lumotlari yo'q")
     cust, errs = await validate(db, actor, body)
     _raise(errs)
     ex = body.existing
     pid = (ex.platform_id or "").strip() or None
-    ct = Contract(customer_id=cust.id, number=(ex.number or "").strip(), status="signed", is_active=True, created_by_id=actor.id, events=[],
+    ct = Contract(customer_id=cust.id, number=(ex.number or "").strip(), status="draft", is_active=False, created_by_id=actor.id, events=[],
                   type=body.type, valid_from=body.valid_from, valid_to=body.valid_to, source="manual", signed_on=ex.signed_on,
-                  signed_at=utcnow(), platform=(ex.platform or "other") if pid else None, platform_id=pid)
+                  platform=(ex.platform or "other") if pid else None, platform_id=pid)
     _apply(cust, ct, body)
     _event(ct, actor, "imported")
     db.add(ct)
     await db.flush()
+    log(db, ct, cust, actor, "act_contract_imported", f"Mavjud shartnoma kiritildi: {ct.display_number} «{cust.name}» — PDF kutilmoqda")
     if file:
         await _put_scan(storage, ct, file)
-    log(db, ct, cust, actor, "act_contract_imported", f"Mavjud shartnoma kiritildi (tasdiqqa): {ct.display_number} «{cust.name}»")
+        _promote_existing(db, ct, cust, actor)
     await db.commit()
     return await get(db, actor, ct.id)
+
+
+def awaiting_scan(ct: Contract) -> bool:
+    """Imzolangan nusxa (PDF) kutilmoqda: mavjud shartnoma PDF'siz yoki qog'oz imzoli loyiha (raqam berilgan, tekshirilgan)."""
+    return ct.status == "draft" and bool(ct.number) and not ct.draft_data and (ct.source in ("manual", "import") or ct.sign_method == "paper")
+
+
+def _promote_existing(db: AsyncSession, ct: Contract, cust: Customer, actor: User) -> None:
+    """Mavjud shartnomaning PDF'i yuklandi → buxgalter tasdig'iga (faol)."""
+    ct.status, ct.is_active, ct.signed_at = "signed", True, utcnow()
+    _event(ct, actor, "signed")
+    log(db, ct, cust, actor, "act_contract_signed", f"Mavjud shartnoma PDF'i yuklandi, buxgalteriyaga yuborildi: {ct.display_number} «{cust.name}»")
 
 
 def log(db: AsyncSession, ct: Contract, cust: Customer, actor: User, kind: str, text: str, comment: str | None = None) -> None:
@@ -369,6 +383,9 @@ async def sign(db: AsyncSession, storage: Storage, actor: User, contract_id: int
         dup = (await db.execute(select(Contract.id).where(Contract.platform_id == pid, Contract.id != ct.id))).first()
         if dup:
             raise conflict("platform_id_taken", "Bu platforma ID boshqa shartnomada bor")
+    if method == "paper" and not file and not ct.scan_key:
+        # Qog'ozda: imzolangan nusxaning skani (PDF) yuklanmaguncha «Tugallanmagan»da qoladi
+        raise invalid("scan_required_paper", "Qog'ozda imzolangan shartnomaning skanini (PDF) yuklang")
     if file:
         await _put_scan(storage, ct, file)
     was_returned = ct.status == "returned"
@@ -386,7 +403,7 @@ async def _put_scan(storage: Storage, ct: Contract, file: tuple[bytes, str, str]
     data, ctype, name = file
     ctype = (ctype or "").split(";")[0].strip().lower()
     if ctype not in SCAN_TYPES:
-        raise invalid("bad_scan", "Fayl: PDF, JPG yoki PNG")
+        raise invalid("bad_scan", "Fayl faqat PDF bo'lsin")
     if not data or len(data) > get_settings().max_upload_mb * 1024 * 1024:
         raise invalid("file_too_large", f"Fayl bo'sh yoki {get_settings().max_upload_mb} MB dan katta")
     key = f"contracts/{ct.id}/{uuid4().hex}.{SCAN_TYPES[ctype]}"
@@ -397,6 +414,8 @@ async def _put_scan(storage: Storage, ct: Contract, file: tuple[bytes, str, str]
 async def attach_scan(db: AsyncSession, storage: Storage, actor: User, contract_id: int, file: tuple[bytes, str, str]) -> Contract:
     ct = await _own(db, actor, contract_id, lock=True)
     await _put_scan(storage, ct, file)
+    if ct.status == "draft" and ct.source in ("manual", "import") and ct.number:
+        _promote_existing(db, ct, ct.customer, actor)
     await db.commit()
     return await get(db, actor, ct.id)
 
@@ -475,7 +494,9 @@ def out(ct: Contract, used: float | None = None, with_events: bool = False) -> d
          "customer": {"id": c.id, "name": c.name, "code": c.code, "stir": c.stir, "district_id": c.district_id, "director": c.director,
                       "phone": c.phone, "legal_address": c.legal_address, "address": c.address, "bank": c.bank, "mfo": c.mfo,
                       "account": c.account, "oked": c.oked, "cadastre": c.cadastre, "is_rented": c.is_rented} if c else None,
-         "draft": json.loads(ct.draft_data) if ct.draft_data else None, "source": ct.source}
+         "draft": json.loads(ct.draft_data) if ct.draft_data else None, "source": ct.source, "awaiting_scan": awaiting_scan(ct),
+         "submitted_by": next((e.actor.full_name for e in reversed(ct.events) if e.action in ("signed", "resubmitted", "imported") and e.actor),
+                              None) if "events" in ct.__dict__ else None}
     if used is not None:
         d["used_m3"] = used
         if ct.annual_volume:

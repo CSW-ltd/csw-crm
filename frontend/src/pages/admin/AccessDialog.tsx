@@ -4,7 +4,7 @@ import { Alert, Box, Button, Checkbox, CircularProgress, Dialog, DialogActions, 
 import { adminApi } from "@/api/endpoints";
 import { errorCode, errorMessage } from "@/api/client";
 import { useI18n } from "@/i18n/I18nContext";
-import type { MessageKey } from "@/i18n/messages";
+import { MESSAGES, type MessageKey } from "@/i18n/messages";
 import { toast } from "@/lib/alerts";
 import { useAppSelector } from "@/store";
 import type { Access, AdminUser, District } from "@/types";
@@ -57,13 +57,16 @@ export function AccessDialog({ user, districts, onClose, onSaved }: { user: Admi
             {/* Har bo'lim — bitta qator: nomi va uning amallari (keng jadval o'rniga — gorizontal skrollsiz) */}
             <Box id="access-matrix" sx={{ border: 1, borderColor: "divider", borderRadius: 1 }}>
               {Object.entries(modules).map(([m, acts], i) => (
-                <Box key={m} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "140px 1fr" }, gap: { xs: 0.5, sm: 2 }, alignItems: "center",
+                <Box key={m} sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "190px 1fr" }, gap: { xs: 0.5, sm: 2 }, alignItems: "center",
                   px: 2, py: 1.25, borderTop: i ? 1 : 0, borderColor: "divider" }}>
-                  <Typography fontWeight={600}>{t(`m_${m}` as MessageKey)}</Typography>
+                  <Box>
+                    <Typography fontWeight={600} data-module={m}>{t(`m_${m}` as MessageKey)}</Typography>
+                    {`mh_${m}` in MESSAGES && <Typography variant="caption" color="text.secondary" display="block">{t(`mh_${m}` as MessageKey)}</Typography>}
+                  </Box>
                   <Stack direction="row" flexWrap="wrap" useFlexGap columnGap={2}>
                     {acts.map((a) => {
                       const code = `${m}.${a}`;
-                      return <FormControlLabel key={a} sx={{ mr: 0 }} label={<Typography variant="body2">{t(`a_${a}` as MessageKey)}</Typography>}
+                      return <FormControlLabel key={a} sx={{ mr: 0 }} label={<Typography variant="body2">{t((`a_${m}_${a}` in MESSAGES ? `a_${m}_${a}` : `a_${a}`) as MessageKey)}</Typography>}
                         control={<Checkbox size="small" checked={perms.has(code)} disabled={readOnly || !grantable.has(code)} onChange={() => toggle(code)}
                           inputProps={{ "aria-label": code, "data-code": code } as React.InputHTMLAttributes<HTMLInputElement>} />} />;
                     })}

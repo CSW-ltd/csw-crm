@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, InputAdornment, LinearProgress, Paper, Stack, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import NoteAddIcon from "@mui/icons-material/NoteAdd";
 import CheckIcon from "@mui/icons-material/CheckCircle";
 import UndoIcon from "@mui/icons-material/Undo";
+import UploadIcon from "@mui/icons-material/UploadFile";
+import DescriptionIcon from "@mui/icons-material/Description";
+import ScanIcon from "@mui/icons-material/DocumentScanner";
 import { contractsApi } from "@/api/endpoints";
 import { errorCode, errorMessage } from "@/api/client";
 import { STAGE } from "@/components/Stage";
@@ -22,7 +25,19 @@ import { usePersisted } from "@/hooks/usePersisted";
 
 const FILTERS: ("all" | ContractStatus)[] = ["all", "draft", "signed", "returned", "approved"];
 const dt = (s?: string | null) => (s ? formatDateTime(new Date(s + "Z")) : "—");
-const ROW_BG: Record<ContractStatus, string | undefined> = { draft: undefined, signed: "#FFFBCC", returned: "#FDECEA", approved: "#E6F6EC" };
+/** Holat rangi — faqat chap chiziq va belgi uchun (fon o'zgarmaydi: yorug'/qorong'i rejimda ham o'qiladi). */
+export const STATUS_EDGE: Record<ContractStatus, string> = { draft: "text.disabled", signed: STAGE.yellow.border, returned: "error.main", approved: "success.main" };
+const openBlob = (p: Promise<Blob>, fail: (e: unknown) => void) => {
+  const w = window.open("", "_blank");
+  p.then((b) => { const u = URL.createObjectURL(b); if (w) w.location.href = u; }).catch((e) => { w?.close(); fail(e); });
+};
+export function AwaitChip({ c }: { c: ContractItem }) {
+  const { t } = useI18n();
+  if (!c.awaiting_scan) return null;
+  const pdf = c.source === "manual" || c.source === "import";
+  return <Chip size="small" color="warning" variant="outlined" icon={<UploadIcon />} data-awaiting={pdf ? "pdf" : "scan"}
+    label={t(pdf ? "ctr_await_pdf" : "ctr_await_scan")} sx={{ fontWeight: 600 }} />;
+}
 
 export function UsageBar({ c }: { c: Pick<ContractItem, "used_m3" | "annual_volume" | "usage_pct" | "usage_level"> }) {
   const { t } = useI18n();
@@ -45,13 +60,16 @@ export function ContractsTab({ districts }: RefData) {
   const isLegal = can("customers.contract");
   const isAcc = can("accounting.payments");
   const role = useAppSelector((st) => st.auth.user?.role);  // legal uchun «Yangi shartnoma» yorliqlar qatorida turadi
+  const accView = isAcc && !isLegal;  // buxgalter: ikki bo'lim, kartalar
   const [filter, setFilter] = usePersisted<(typeof FILTERS)[number]>(`ctr.filter.${isLegal ? "l" : "a"}`, isLegal ? "all" : "signed");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [data, setData] = useState<{ items: ContractItem[]; total: number } | null>(null);
   const [counts, setCounts] = useState<Partial<Record<ContractStatus, number>>>({});
   const [open, setOpen] = useState<number | null>(null);
+  const [startReturn, setStartReturn] = useState(false);
   const [wizard, setWizard] = useState<{ id?: number } | null>(null);
+  const [busyId, setBusyId] = useState<number | null>(null);
   const fail = useCallback((e: unknown) => toast(tErr(errorCode(e), errorMessage(e)), "error"), [tErr]);
 
   useEffect(() => { const h = window.setTimeout(() => setQuery(q.trim()), 300); return () => window.clearTimeout(h); }, [q]);
@@ -69,6 +87,14 @@ export function ContractsTab({ districts }: RefData) {
     return () => window.removeEventListener(CONTRACTS_CHANGED, load);
   }, [load]);
 
+  const approve = async (c: ContractItem) => {
+    setBusyId(c.id);
+    try { await contractsApi.approve(c.id); toast(t("ctr_approved_ok"), "success"); load(); } catch (e) { fail(e); } finally { setBusyId(null); }
+  };
+  const view = (id: number, ret = false) => { setStartReturn(ret); setOpen(id); };
+  const sections = accView && data ? (["paper", "electronic"] as const).map((m) => ({
+    m, items: data.items.filter((c) => (c.sign_method === "electronic" ? "electronic" : "paper") === m) })) : [];
+
   return (
     <Stack spacing={2} id="contracts">
       <Paper variant="outlined" sx={{ p: 2 }}>
@@ -84,7 +110,21 @@ export function ContractsTab({ districts }: RefData) {
             sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>{t("new_contract")}</Button>}
         </Stack>
       </Paper>
-      <Paper variant="outlined" sx={{ p: 2 }}>
+      {accView ? sections.map(({ m, items }) => (
+        <Paper key={m} variant="outlined" sx={{ p: 2 }} id={`ctr-sec-${m}`} data-section={m}>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+            {m === "paper" ? <ScanIcon color="action" /> : <DescriptionIcon color="action" />}
+            <Typography variant="h6" fontWeight={700}>{t(m === "paper" ? "ctr_sec_paper" : "ctr_sec_electronic")}</Typography>
+            <Chip size="small" label={items.length} data-count={items.length} color={items.length ? "primary" : "default"} sx={{ fontWeight: 700 }} />
+          </Stack>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{t(m === "paper" ? "ctr_sec_paper_hint" : "ctr_sec_electronic_hint")}</Typography>
+          <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "1fr 1fr", xl: "1fr 1fr 1fr" } }}>
+            {items.map((c) => <ContractCard key={c.id} c={c} district={districts.find((d) => d.id === c.customer?.district_id)?.name}
+              busy={busyId === c.id} onOpen={() => view(c.id)} onApprove={() => approve(c)} onReturn={() => view(c.id, true)} fail={fail} />)}
+          </Box>
+          {!items.length && <Typography color="text.secondary">{t("ctr_none")}</Typography>}
+        </Paper>
+      )) : <Paper variant="outlined" sx={{ p: 2 }}>
         <TableContainer><Table size="small" id="ctr-table">
           <TableHead><TableRow>
             <TableCell>{t("contract_no")}</TableCell><TableCell>{t("cmp_name")}</TableCell><TableCell>{t("district")}</TableCell>
@@ -93,8 +133,8 @@ export function ContractsTab({ districts }: RefData) {
           </TableRow></TableHead>
           <TableBody>
             {data?.items.map((c) => (
-              <TableRow key={c.id} hover data-contract={c.number} onClick={() => setOpen(c.id)} sx={{ cursor: "pointer", bgcolor: ROW_BG[c.status] }}>
-                <TableCell sx={{ fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>{c.display_number || "—"}
+              <TableRow key={c.id} hover data-contract={c.number} onClick={() => view(c.id)} sx={{ cursor: "pointer" }}>
+                <TableCell sx={{ fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap", borderLeft: 4, borderLeftColor: STATUS_EDGE[c.status] }}>{c.display_number || "—"}
                   {c.platform_id && <Typography variant="caption" display="block" color="text.secondary">{c.number}</Typography>}
                   {c.source && c.source !== "flow" && <Typography variant="caption" display="block" color="text.secondary">{t("ctr_src_" + c.source as MessageKey)}</Typography>}</TableCell>
                 <TableCell>{c.customer?.name} <Typography component="span" variant="caption" sx={{ fontFamily: "ui-monospace, monospace" }}>{c.customer?.code}</Typography></TableCell>
@@ -103,25 +143,68 @@ export function ContractsTab({ districts }: RefData) {
                 <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>{fmtMoney(c.total)}</TableCell>
                 <TableCell sx={{ whiteSpace: "nowrap" }}>{c.valid_from} — {c.valid_to}</TableCell>
                 <TableCell><UsageBar c={c} /></TableCell>
-                <TableCell><StatusChip status={c.status} /></TableCell>
+                <TableCell><Stack spacing={0.5} alignItems="flex-start"><StatusChip status={c.status} /><AwaitChip c={c} /></Stack></TableCell>
               </TableRow>
             ))}
             {data && !data.items.length && <TableRow><TableCell colSpan={8}><Typography color="text.secondary">{t("ctr_none")}</Typography></TableCell></TableRow>}
           </TableBody>
         </Table></TableContainer>
-      </Paper>
-      {open !== null && <ContractView id={open} isLegal={isLegal} isAcc={isAcc} districts={districts} onClose={() => setOpen(null)}
+      </Paper>}
+      {open !== null && <ContractView id={open} isLegal={isLegal} isAcc={isAcc} districts={districts} startReturn={startReturn} onClose={() => setOpen(null)}
         onChanged={load} onEdit={(id) => { setOpen(null); setWizard({ id }); }} />}
       {wizard && <ContractWizard districts={districts} contractId={wizard.id} onClose={() => setWizard(null)} onDone={load} />}
     </Stack>
   );
 }
 
-function ContractView({ id, isLegal, isAcc, districts, onClose, onChanged, onEdit }: { id: number; isLegal: boolean; isAcc: boolean;
-  districts: RefData["districts"]; onClose: () => void; onChanged: () => void; onEdit: (id: number) => void }) {
+/** Buxgalter navbatidagi karta: mavzuga mos fon, chapda holat rangi, katta yozuv, amallar kartaning o'zida. */
+function ContractCard({ c, district, busy, onOpen, onApprove, onReturn, fail }: { c: ContractItem; district?: string; busy: boolean;
+  onOpen: () => void; onApprove: () => void; onReturn: () => void; fail: (e: unknown) => void }) {
+  const { t } = useI18n();
+  const kv = (k: MessageKey, v?: string | number | null) => <Box sx={{ minWidth: 0 }}>
+    <Typography variant="caption" color="text.secondary" display="block">{t(k)}</Typography>
+    <Typography variant="body1" fontWeight={600} sx={{ overflowWrap: "anywhere" }}>{v ?? "—"}</Typography></Box>;
+  return (
+    <Paper variant="outlined" data-card-contract={c.display_number} data-status={c.status}
+      sx={{ p: 2, bgcolor: "background.paper", color: "text.primary", borderLeft: 6, borderLeftColor: STATUS_EDGE[c.status], display: "flex", flexDirection: "column", gap: 1.25 }}>
+      <Stack direction="row" spacing={1} alignItems="flex-start" justifyContent="space-between">
+        <Box sx={{ minWidth: 0 }}>
+          <Typography variant="h6" fontWeight={700} lineHeight={1.25} sx={{ overflowWrap: "anywhere" }}>{c.customer?.name}</Typography>
+          <Typography variant="body2" color="text.secondary">
+            <Box component="span" sx={{ fontFamily: "ui-monospace, monospace" }}>{c.customer?.code}</Box>{district ? ` · ${district}` : ""}</Typography>
+        </Box>
+        <StatusChip status={c.status} />
+      </Stack>
+      <Box sx={{ display: "grid", gap: 1, gridTemplateColumns: "1fr 1fr" }}>
+        {kv(c.platform_id ? "ctr_platform_id" : "contract_no", c.platform_id ? `${c.platform_id}${c.platform ? ` (${t(`ctr_pl_${c.platform}` as MessageKey)})` : ""}` : c.display_number || "—")}
+        {kv("ctr_internal_no", c.number)}
+        {kv("contract_type", t(`ct_${c.type}` as MessageKey))}{kv("ctr_annual_volume", c.annual_volume != null ? `${c.annual_volume} m³` : null)}
+        {kv("ctr_total", fmtMoney(c.total))}{kv("ctr_period", `${c.valid_from} — ${c.valid_to}`)}
+        {kv("signed_on", c.signed_on ? `${c.signed_on} · ${t(c.sign_method === "electronic" ? "sm_electronic" : "sm_paper")}` : null)}
+        {kv("ctr_submitted", c.submitted_by ? `${c.submitted_by}${c.signed_at ? ` · ${dt(c.signed_at)}` : ""}` : null)}
+      </Box>
+      {c.source && c.source !== "flow" && <Typography variant="caption" color="text.secondary">{t("ctr_src_" + c.source as MessageKey)}</Typography>}
+      {c.status === "returned" && c.return_comment && <Alert severity="error" variant="outlined" sx={{ py: 0 }}>{c.return_comment}</Alert>}
+      <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: "auto", pt: 0.5 }}>
+        {c.status === "signed" && <>
+          <Button size="medium" variant="contained" disableElevation startIcon={<CheckIcon />} disabled={busy} data-act="approve" onClick={onApprove}
+            sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>{t("ctr_approve")}</Button>
+          <Button size="medium" color="error" variant="outlined" startIcon={<UndoIcon />} disabled={busy} data-act="return" onClick={onReturn}>{t("ctr_return")}</Button>
+        </>}
+        <Button size="medium" variant="outlined" startIcon={<DescriptionIcon />} data-act="doc" onClick={() => openBlob(contractsApi.document(c.id, "pdf"), fail)}>{t("ctr_doc")}</Button>
+        {c.has_scan && <Button size="medium" variant="outlined" startIcon={<ScanIcon />} data-act="scan" onClick={() => openBlob(contractsApi.scan(c.id), fail)}>{t("ctr_scan")}</Button>}
+        <Button size="medium" data-act="open" onClick={onOpen}>{t("ctr_open")}</Button>
+      </Stack>
+    </Paper>
+  );
+}
+
+function ContractView({ id, isLegal, isAcc, districts, startReturn, onClose, onChanged, onEdit }: { id: number; isLegal: boolean; isAcc: boolean;
+  districts: RefData["districts"]; startReturn?: boolean; onClose: () => void; onChanged: () => void; onEdit: (id: number) => void }) {
   const { t, tErr } = useI18n();
   const [c, setC] = useState<ContractItem | null>(null);
-  const [ret, setRet] = useState<string | null>(null);
+  const [ret, setRet] = useState<string | null>(startReturn ? "" : null);
+  const pdfRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const fail = useCallback((e: unknown) => toast(tErr(errorCode(e), errorMessage(e)), "error"), [tErr]);
   useEffect(() => { contractsApi.get(id).then(setC).catch(fail); }, [id, fail]);
@@ -129,21 +212,22 @@ function ContractView({ id, isLegal, isAcc, districts, onClose, onChanged, onEdi
     setBusy(true);
     try { setC(await fn()); toast(t(msg), "success"); setRet(null); onChanged(); window.dispatchEvent(new Event(CONTRACTS_CHANGED)); } catch (e) { fail(e); } finally { setBusy(false); }
   };
-  const openBlob = (p: Promise<Blob>) => { const w = window.open("", "_blank"); p.then((b) => { const u = URL.createObjectURL(b); if (w) w.location.href = u; })
-    .catch((e) => { w?.close(); fail(e); }); };
+  const openDoc = (p: Promise<Blob>) => openBlob(p, fail);
   if (!c) return null;
+  const needPdf = c.awaiting_scan && (c.source === "manual" || c.source === "import");
   const cu = c.customer;
   const row = (k: MessageKey, v?: string | number | null) => <Box><Typography variant="caption" color="text.secondary">{t(k)}</Typography>
     <Typography variant="body2">{v ?? "—"}</Typography></Box>;
   return (
     <Dialog open onClose={onClose} fullWidth maxWidth="md" id="ctr-view">
       <DialogTitle sx={{ display: "flex", gap: 1, alignItems: "center", flexWrap: "wrap" }}>
-        {t("ctr_title_n", { n: c.display_number })} <StatusChip status={c.status} />
+        {t("ctr_title_n", { n: c.display_number })} <StatusChip status={c.status} /> <AwaitChip c={c} />
       </DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
           {c.status === "returned" && c.return_comment && <Alert severity="error"><b>{t("ctr_returned_by")}</b> {c.return_comment}</Alert>}
           {c.status === "signed" && <Alert severity="warning" variant="outlined">{t("ctr_pending_hint")}</Alert>}
+          {c.awaiting_scan && <Alert severity="warning" id="ctr-await-alert">{t(needPdf ? "ex_pdf_hint" : "ctr_paper_wait_hint")}</Alert>}
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4, 1fr)" } }}>
             {row("cmp_name", cu?.name)}{row("stir", cu?.stir)}{row("district", districts.find((d) => d.id === cu?.district_id)?.name)}{row("director", cu?.director)}
             {row("ctr_f_account", cu?.account)}{row("ctr_f_mfo", cu?.mfo)}{row("ctr_f_bank", cu?.bank)}{row("phone", cu?.phone)}
@@ -154,9 +238,9 @@ function ContractView({ id, isLegal, isAcc, districts, onClose, onChanged, onEdi
           </Box>
           <UsageBar c={c} />
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-            <Button size="small" variant="outlined" onClick={() => openBlob(contractsApi.document(c.id, "pdf"))}>{t("ctr_open_pdf")}</Button>
+            <Button size="small" variant="outlined" onClick={() => openDoc(contractsApi.document(c.id, "pdf"))}>{t("ctr_open_pdf")}</Button>
             <Button size="small" variant="outlined" onClick={() => contractsApi.document(c.id, "docx").then((b) => saveBlob(b, `shartnoma_${(c.number ?? "loyiha").replace(/\W+/g, "_")}.docx`)).catch(fail)}>{t("ctr_word")}</Button>
-            {c.has_scan && <Button size="small" variant="outlined" id="ctr-scan" onClick={() => openBlob(contractsApi.scan(c.id))}>{t("ctr_scan")}</Button>}
+            {c.has_scan && <Button size="small" variant="outlined" id="ctr-scan" onClick={() => openDoc(contractsApi.scan(c.id))}>{t("ctr_scan")}</Button>}
           </Stack>
           <Box>
             <Typography variant="subtitle2" sx={{ mb: 0.5 }}>{t("ctr_history")}</Typography>
@@ -168,7 +252,15 @@ function ContractView({ id, isLegal, isAcc, districts, onClose, onChanged, onEdi
         </Stack>
       </DialogContent>
       <DialogActions sx={{ flexWrap: "wrap", gap: 1 }}>
-        {isLegal && (c.status === "draft" || c.status === "returned") && <Button id="ctr-continue" variant="contained" disableElevation onClick={() => onEdit(c.id)}>
+        {isLegal && needPdf && <>
+          <input ref={pdfRef} type="file" hidden accept="application/pdf,.pdf" id="ctr-pdf-file" onChange={(e) => {
+            const f = e.target.files?.[0]; e.target.value = "";
+            if (f) act(() => contractsApi.uploadScan(c.id, f), "ctr_pdf_uploaded");
+          }} />
+          <Button id="ctr-upload-pdf" variant="contained" color="warning" disableElevation startIcon={<UploadIcon />} disabled={busy}
+            onClick={() => pdfRef.current?.click()}>{t("ctr_upload_pdf")}</Button>
+        </>}
+        {isLegal && !needPdf && (c.status === "draft" || c.status === "returned") && <Button id="ctr-continue" variant="contained" disableElevation onClick={() => onEdit(c.id)}>
           {t(c.status === "returned" ? "ctr_fix" : "ctr_continue")}</Button>}
         <Box sx={{ flex: 1 }} />
         {isAcc && c.status === "signed" && (ret === null
