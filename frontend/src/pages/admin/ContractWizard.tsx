@@ -138,7 +138,9 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
       try {
         const c = await contractsApi.createExisting(payload());
         if (exFile) await contractsApi.uploadScan(c.id, exFile);
-        changed(); toast(t("ex_saved_pending", { n: c.display_number }), "success"); onDone?.(c); onClose();
+        changed();
+        toast(t(exFile ? "ex_saved_pending" : "ex_saved_await_pdf", { n: c.display_number }), exFile ? "success" : "warning");
+        onDone?.(c); onClose();
       } catch (e) { fail(e); } finally { setBusy(false); }
       return;
     }
@@ -241,10 +243,12 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
                 <TextField size="small" name="ex_pid" label={t("ctr_platform_id")} value={ex.platform_id}
                   onChange={(e) => { setEx({ ...ex, platform_id: e.target.value }); setChecked(null); }} error={!!errOf("platform_id")} helperText={helper("platform_id")} />
               </>}
-              <Box>
-                <input ref={exFileRef} type="file" hidden accept="application/pdf,image/jpeg,image/png" onChange={(e) => setExFile(e.target.files?.[0] ?? null)} />
-                <Button size="small" onClick={() => exFileRef.current?.click()}>{t("ctr_attach_scan")}</Button>
-                {exFile && <Chip size="small" label={exFile.name} onDelete={() => setExFile(null)} sx={{ ml: 1 }} />}
+              <Box sx={{ gridColumn: { md: "1 / -1" } }}>
+                <input ref={exFileRef} type="file" hidden accept="application/pdf" id="ex-file" onChange={(e) => setExFile(e.target.files?.[0] ?? null)} />
+                <Button size="small" variant={exFile ? "text" : "outlined"} color={exFile ? "primary" : "warning"} onClick={() => exFileRef.current?.click()}>
+                  {t("ex_pdf_required")}</Button>
+                {exFile ? <Chip size="small" color="success" label={exFile.name} onDelete={() => setExFile(null)} sx={{ ml: 1 }} />
+                  : <Typography variant="caption" color="warning.main" sx={{ ml: 1 }}>{t("ex_pdf_hint")}</Typography>}
               </Box>
             </Box>
           </>}
@@ -275,7 +279,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
         {step === 1 && <>
           <Button id="ctr-check" variant="outlined" startIcon={<FactCheckIcon />} onClick={runCheck} disabled={busy}>{t("ctr_check")}</Button>
           <Button id="ctr-save" variant="contained" disableElevation onClick={save} disabled={busy || !checked?.ok}
-            sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>{t(isEx ? "ex_send_accountant" : ct ? "ctr_save_changes" : "ctr_save_number")}</Button>
+            sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>{t(isEx ? (exFile ? "ex_send_accountant" : "ex_save_await_pdf") : ct ? "ctr_save_changes" : "ctr_save_number")}</Button>
         </>}
       </DialogActions>
     </Dialog>
@@ -387,13 +391,15 @@ function DocStep({ ct, busy, setBusy, fail, onSigned, onDeleted }: { ct: Contrac
                 onChange={(e) => setSign({ ...sign, platform_id: e.target.value })} helperText={t("ctr_platform_id_hint")} />
             </>}
             <Box>
-              <input ref={fileRef} type="file" hidden accept="application/pdf,image/jpeg,image/png" id="ctr-file"
+              <input ref={fileRef} type="file" hidden accept="application/pdf" id="ctr-file"
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-              <Button size="small" onClick={() => fileRef.current?.click()}>{t(electronic ? "ctr_attach_signed" : "ctr_attach_scan")}</Button>
-              {file && <Chip size="small" label={file.name} onDelete={() => setFile(null)} sx={{ ml: 1 }} />}
+              <Button size="small" variant={!electronic && !file ? "outlined" : "text"} color={!electronic && !file ? "warning" : "primary"}
+                onClick={() => fileRef.current?.click()}>{t(electronic ? "ctr_attach_signed" : "ctr_attach_scan_required")}</Button>
+              {file && <Chip size="small" color="success" label={file.name} onDelete={() => setFile(null)} sx={{ ml: 1 }} />}
+              {!electronic && !file && <Typography variant="caption" color="warning.main" display="block" sx={{ mt: 0.5 }}>{t("ctr_paper_wait_hint")}</Typography>}
             </Box>
             <Button id="ctr-signed" variant="contained" disableElevation size="large" startIcon={<DrawIcon />}
-              disabled={busy || !sign.signed_on || (electronic && !sign.platform_id.trim())} onClick={submit}
+              disabled={busy || !sign.signed_on || (electronic ? !sign.platform_id.trim() : !file && !ct.has_scan)} onClick={submit}
               sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>{t("ctr_signed_send")}</Button>
           </Stack>
         </Paper>}

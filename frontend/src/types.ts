@@ -358,7 +358,7 @@ export interface ContractItem { id: number; number: string | null; platform: str
   has_scan: boolean; return_comment: string | null; signed_at: string | null; approved_at: string | null; created_at: string;
   total: number; vat: number; is_active: boolean; used_m3?: number; usage_pct?: number; usage_level?: "ok" | "warn" | "over";
   customer: Requisites & { id: number; code: string | null; district_id: number } | null; events?: ContractEventItem[];
-  draft?: Partial<ContractDraft> & { requisites?: Requisites } | null; source?: "flow" | "manual" | "import" }
+  draft?: Partial<ContractDraft> & { requisites?: Requisites } | null; source?: "flow" | "manual" | "import"; awaiting_scan?: boolean; submitted_by?: string | null }
 export interface ExistingContract { customer_id: number; number: string; platform?: string | null; platform_id?: string | null; type: ContractType;
   price?: number | null; annual_volume?: number | null; signed_on: string; valid_from: string; valid_to: string; sign_method: "electronic" | "paper" }
 export interface ExistingImportResult { dry_run: boolean; ok: number; total: number; created: number; errors: { line: number; error: string; value: string }[];

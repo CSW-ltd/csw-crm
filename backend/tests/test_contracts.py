@@ -113,8 +113,16 @@ async def test_pending_not_billed_until_approved(world, client_factory, sessionm
     legal, acc = await client_factory("legal"), await client_factory("buxgalter")
     cid = await _new_customer(legal, world)
     ct = (await legal.post("/api/v1/contracts", json=body(cid, sign_method="paper"))).json()
-    ct = (await legal.post(f"/api/v1/contracts/{ct['id']}/sign", data={"signed_on": str(T), "sign_method": "paper"})).json()
-    assert ct["status"] == "signed" and ct["platform_id"] is None and not ct["has_scan"]
+    # Qog'ozda: skansiz «Imzolandi» bo'lmaydi — «Tugallanmagan»da skan kutadi
+    r = await legal.post(f"/api/v1/contracts/{ct['id']}/sign", data={"signed_on": str(T), "sign_method": "paper"})
+    assert r.json()["error"]["code"] == "scan_required_paper"
+    assert (await legal.get(f"/api/v1/contracts/{ct['id']}")).json()["awaiting_scan"]
+    bad = await legal.post(f"/api/v1/contracts/{ct['id']}/sign", data={"signed_on": str(T), "sign_method": "paper"},
+                           files={"file": ("s.png", b"png", "image/png")})
+    assert bad.json()["error"]["code"] == "bad_scan"
+    ct = (await legal.post(f"/api/v1/contracts/{ct['id']}/sign", data={"signed_on": str(T), "sign_method": "paper"},
+                           files={"file": ("s.pdf", b"%PDF-1.4", "application/pdf")})).json()
+    assert ct["status"] == "signed" and ct["platform_id"] is None and ct["has_scan"] and not ct["awaiting_scan"]
     # Shu korxonaga bajarilgan murojaat (5 m³)
     rid = world["requests"][2]
     async with sessionmaker() as s:

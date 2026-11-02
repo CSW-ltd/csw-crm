@@ -284,3 +284,19 @@ Batafsil kelishuvlar: `docs/plans/three-stage-flow.md`.
   to'lovlar, oyni yopish va fakturalar — kim, qachon, qaysi tuman. Qo'ng'iroqcha soniga kirmaydi.
   Eksport: `GET /api/v1/situation/export?kind=&level=&district_id=&date_from=&date_to=` — tur tanlangan bo'lsa PDF, aks holda ZIP
   (har tur alohida PDF).
+
+## Vaziyat — manager/buxgalter, majburiy PDF, buxgalter kartalari (PR #20)
+
+- **Vaziyat paneli** endi admin, manager va buxgalterda. Manager va buxgalter faqat **o'z tumanlari** hodisalarini ko'radi
+  (socket xonasi `sit:{district_id}`). Staff tasdiqlash tugmalari — faqat admin.
+- **Qayta biriktirish xabari:** GPS «Qayta biriktirish»ni bosganda tuman manageriga ogohlantirish (`request_reassigned`) — qo'ng'iroqcha
+  soniga kiradi. Birinchi biriktirish faqat faoliyat jurnaliga yoziladi.
+- **Qog'ozda imzolash:** imzolangan skan PDF'siz «Imzolandi» qabul qilinmaydi (`scan_required_paper`). Shartnoma «Tugallanmagan»da
+  «Imzolangan skan kutilmoqda» belgisi bilan turadi.
+- **Mavjud shartnomalar:** asl nusxa PDF majburiy. PDF'siz saqlansa — «Tugallanmagan» («PDF kutilmoqda»), ko'rinishda «PDF yuklash»;
+  yuklangach buxgalter tasdig'iga ketadi. Excel import ham har shartnoma uchun PDF kutadi. Skan faqat PDF.
+  Migratsiya 0017: skansiz qo'lda/Excel kiritilgan «imzolangan»larni «Tugallanmagan»ga qaytaradi.
+- **Buxgalter oynasi:** ikki bo'lim — «Qog'ozdagi shartnomalar» va «Elektron shartnomalar» (sonlari bilan). Kartalar mavzuga mos
+  (yorug'/qorong'i), chapda holat rangidagi chiziq, katta yozuvlar, karta ustida: Tasdiqlash, Izoh bilan qaytarish, Hujjat, Skan.
+- **Huquqlar jadvali:** xom kalitlar (`m_orders` va h.k.) o'rniga tushunarli nomlar va izohlar; «Murojaatlar» ikki xil nom oldi —
+  «Chiqish murojaatlari» va «Yangi korxona murojaatlari».

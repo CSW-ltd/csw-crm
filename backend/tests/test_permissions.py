@@ -41,7 +41,7 @@ async def test_me_has_permissions_and_scope(world, client_factory):
     assert (await gps.get("/api/v1/auth/me")).json()["district_ids"] == [world["districts"]["a"]]
 
 
-async def test_default_manager_is_read_only_and_has_no_situation(world, client_factory):
+async def test_default_manager_is_read_only_and_sees_own_situation(world, client_factory):
     mgr = await client_factory("manager")
     assert (await mgr.get("/api/v1/admin/users")).status_code == 200
     assert (await mgr.post("/api/v1/admin/users", json={"username": "x1", "full_name": "Xx", "role": "gps",
@@ -49,7 +49,9 @@ async def test_default_manager_is_read_only_and_has_no_situation(world, client_f
     assert (await mgr.patch(f"/api/v1/admin/vehicles/{world['vehicles']['v1']}", json={"model": "X"})).status_code == 403
     assert (await mgr.put("/api/v1/admin/settings", json={"gps_radius_m": 200})).status_code == 403
     assert (await mgr.patch(f"/api/v1/admin/districts/{world['districts']['a']}", json={"is_active": False})).status_code == 403
-    assert (await mgr.get("/api/v1/situation")).status_code == 403
+    # PR #20: manager Vaziyat panelini ko'radi — faqat o'z tumanlari
+    r = await mgr.get("/api/v1/situation")
+    assert r.status_code == 200
 
 
 async def test_admin_grants_and_manager_scope(world, client_factory):

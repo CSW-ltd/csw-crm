@@ -31,8 +31,10 @@ async def test_lockout_creates_warning_for_admin(world, client_factory):
         assert ev["ref_type"] == "user" and ev["ref_id"] == world["users"]["driver"]
 
 
-async def test_only_admin_sees_situation(world, client_factory):
-    for username in ("manager", "gps", "legal", "driver"):
+async def test_situation_viewers(world, client_factory):
+    """PR #20: admin, manager va buxgalter ko'radi (manager/buxgalter — o'z tumanlari); qolganlar — 403."""
+    assert (await (await client_factory("manager")).get("/api/v1/situation/unread")).status_code == 200
+    for username in ("gps", "legal", "driver"):
         c = await client_factory(username)
         assert (await c.get("/api/v1/situation")).status_code == 403
         assert (await c.get("/api/v1/situation/unread")).status_code == 403

@@ -14,7 +14,7 @@ from app.services.order_form_pdf import _fonts
 
 KIND_UZ = {
     "act_request_created": "Murojaat yaratildi", "act_request_cancelled": "Murojaat bekor qilindi",
-    "act_assigned": "Mashina biriktirildi", "act_reassigned": "Qayta biriktirildi", "act_form_printed": "Varaqa chop etildi",
+    "act_assigned": "Mashina biriktirildi", "act_reassigned": "Qayta biriktirildi", "request_reassigned": "Qayta biriktirildi (ogohlantirish)", "act_form_printed": "Varaqa chop etildi",
     "act_print_confirmed": "Varaqa printerdan chiqdi", "act_form_closed": "Murojaat varaqa bilan yopildi",
     "act_act_completed": "Dalolatnoma bilan yakunlandi", "act_contract_started": "Shartnoma boshlandi",
     "act_contract_saved": "Shartnoma ma'lumotlari saqlandi", "act_contract_signed": "Shartnoma imzolandi",
