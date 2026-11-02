@@ -18,6 +18,7 @@ import type { ContractItem, ContractStatus } from "@/types";
 import type { RefData } from "./AdminHome";
 import { fmtMoney } from "./CompaniesTab";
 import { CONTRACTS_CHANGED, ContractWizard, saveBlob, StatusChip } from "./ContractWizard";
+import { usePersisted } from "@/hooks/usePersisted";
 
 const FILTERS: ("all" | ContractStatus)[] = ["all", "draft", "signed", "returned", "approved"];
 const dt = (s?: string | null) => (s ? formatDateTime(new Date(s + "Z")) : "—");
@@ -44,7 +45,7 @@ export function ContractsTab({ districts }: RefData) {
   const isLegal = can("customers.contract");
   const isAcc = can("accounting.payments");
   const role = useAppSelector((st) => st.auth.user?.role);  // legal uchun «Yangi shartnoma» yorliqlar qatorida turadi
-  const [filter, setFilter] = useState<(typeof FILTERS)[number]>(isLegal ? "all" : "signed");
+  const [filter, setFilter] = usePersisted<(typeof FILTERS)[number]>(`ctr.filter.${isLegal ? "l" : "a"}`, isLegal ? "all" : "signed");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [data, setData] = useState<{ items: ContractItem[]; total: number } | null>(null);
@@ -93,8 +94,9 @@ export function ContractsTab({ districts }: RefData) {
           <TableBody>
             {data?.items.map((c) => (
               <TableRow key={c.id} hover data-contract={c.number} onClick={() => setOpen(c.id)} sx={{ cursor: "pointer", bgcolor: ROW_BG[c.status] }}>
-                <TableCell sx={{ fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>{c.display_number}
-                  {c.platform_id && <Typography variant="caption" display="block" color="text.secondary">{c.number}</Typography>}</TableCell>
+                <TableCell sx={{ fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>{c.display_number || "—"}
+                  {c.platform_id && <Typography variant="caption" display="block" color="text.secondary">{c.number}</Typography>}
+                  {c.source && c.source !== "flow" && <Typography variant="caption" display="block" color="text.secondary">{t("ctr_src_" + c.source as MessageKey)}</Typography>}</TableCell>
                 <TableCell>{c.customer?.name} <Typography component="span" variant="caption" sx={{ fontFamily: "ui-monospace, monospace" }}>{c.customer?.code}</Typography></TableCell>
                 <TableCell>{districts.find((d) => d.id === c.customer?.district_id)?.name}</TableCell>
                 <TableCell>{t(`ct_${c.type}` as MessageKey)}</TableCell>
@@ -153,7 +155,7 @@ function ContractView({ id, isLegal, isAcc, districts, onClose, onChanged, onEdi
           <UsageBar c={c} />
           <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
             <Button size="small" variant="outlined" onClick={() => openBlob(contractsApi.document(c.id, "pdf"))}>{t("ctr_open_pdf")}</Button>
-            <Button size="small" variant="outlined" onClick={() => contractsApi.document(c.id, "docx").then((b) => saveBlob(b, `shartnoma_${c.number.replace(/\W+/g, "_")}.docx`)).catch(fail)}>{t("ctr_word")}</Button>
+            <Button size="small" variant="outlined" onClick={() => contractsApi.document(c.id, "docx").then((b) => saveBlob(b, `shartnoma_${(c.number ?? "loyiha").replace(/\W+/g, "_")}.docx`)).catch(fail)}>{t("ctr_word")}</Button>
             {c.has_scan && <Button size="small" variant="outlined" id="ctr-scan" onClick={() => openBlob(contractsApi.scan(c.id))}>{t("ctr_scan")}</Button>}
           </Stack>
           <Box>

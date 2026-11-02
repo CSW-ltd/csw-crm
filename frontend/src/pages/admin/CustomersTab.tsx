@@ -10,6 +10,7 @@ import type { CustomerListItem, LocationStatus } from "@/types";
 import { districtLabel, type RefData } from "./AdminHome";
 import { CustomerDialog } from "./CustomerDialog";
 import { ImportDialog } from "./ImportDialog";
+import { usePersisted } from "@/hooks/usePersisted";
 
 const LOC_COLOR = { none: "default", pending: "warning", confirmed: "success" } as const;
 
@@ -34,7 +35,7 @@ export function CustomersTab({ districts, hideActions }: RefData & { hideActions
   const canImport = can("customers.import");
   const [items, setItems] = useState<CustomerListItem[]>([]);
   const [total, setTotal] = useState(0);
-  const [district, setDistrict] = useState<number | "">("");
+  const [district, setDistrict] = usePersisted<number | "">("cust.district", "");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [incomplete, setIncomplete] = useState(false);

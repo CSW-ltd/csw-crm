@@ -34,10 +34,11 @@ async def assign(db: AsyncSession, gps_user: User, request_id: int, vehicle_id: 
         raise conflict("vehicle_not_scheduled", "Bu mashina bugungi ish jadvalida haydovchi bilan yo'q")
     req.naryad_no = await naryad.next_number(db, req.district_id)
     req.vehicle, req.driver = vehicle, plan.driver  # munosabat orqali: javobda darhol ko'rinadi
-    req.status = RequestStatus.assigned
+    # Varaqa printerdan chiqqani tasdiqlanmaguncha murojaat qizil (printing); sariqqa — order_forms.confirm_printed
+    req.status = RequestStatus.printing
     req.assigned_at = utcnow()
     form = await order_forms.create_for(db, req, gps_user)
-    events.record(db, req, gps_user.id, f"{vehicle.plate} · {plan.driver.full_name} · varaqa {form.number}")
+    events.record(db, req, gps_user.id, f"{vehicle.plate} · {plan.driver.full_name} · varaqa {form.number} — chop etilishi kutilmoqda")
     await db.commit()
     await events.broadcast(req)
     return await req_repo.by_id(db, req.id)

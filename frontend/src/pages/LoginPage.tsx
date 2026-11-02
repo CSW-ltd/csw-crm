@@ -6,7 +6,8 @@ import { PasswordField } from "@/components/PasswordField";
 import { useOnline } from "@/hooks/useOnline";
 import { useI18n } from "@/i18n/I18nContext";
 import type { MessageKey } from "@/i18n/messages";
-import { homePath } from "@/lib/routes";
+import { afterLoginPath } from "@/lib/routes";
+import { lastPath } from "@/hooks/usePersisted";
 import { isDemo, isTabMode } from "@/lib/session";
 import { useAppDispatch, useAppSelector } from "@/store";
 import { login } from "@/store/authSlice";
@@ -27,7 +28,7 @@ export function LoginPage() {
   const [caps, setCaps] = useState(false);
   const [touched, setTouched] = useState(false);
 
-  if (user) return <Navigate to={homePath(user)} replace />;
+  if (user) return <Navigate to={afterLoginPath(user, lastPath())} replace />;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

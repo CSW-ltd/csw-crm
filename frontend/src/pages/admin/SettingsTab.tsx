@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
-import { Box, Button, MenuItem, Paper, Select, Slider, Stack, Table, TableBody, TableCell, TableHead, TableRow, TextField, Typography } from "@mui/material";
+import { Box, Button, FormControlLabel, MenuItem, Paper, Select, Slider, Stack, Switch, Table, TableBody, TableCell, TableHead, TableRow, TextField,
+  Typography } from "@mui/material";
 import { adminApi, providersApi } from "@/api/endpoints";
+import { onlyDigits } from "@/components/DigitsField";
 import { errorCode, errorMessage } from "@/api/client";
 import { useCan } from "@/hooks/useCan";
 import { useI18n } from "@/i18n/I18nContext";
@@ -53,7 +55,8 @@ export function SettingsTab(_: RefData) {
         <Typography variant="subtitle1" fontWeight={600}>{t("radius_by_district")}</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{t("radius_by_district_hint")}</Typography>
         <Table size="small" id="district-radius">
-          <TableHead><TableRow><TableCell>{t("district")}</TableCell><TableCell>{t("gps_radius")}</TableCell></TableRow></TableHead>
+          <TableHead><TableRow><TableCell>{t("district")}</TableCell><TableCell>{t("gps_radius")}</TableCell>
+            <TableCell>{t("print_mode")}</TableCell></TableRow></TableHead>
           <TableBody>
             {rows.map((d) => (
               <TableRow key={d.id} data-district={d.name}>
@@ -67,6 +70,13 @@ export function SettingsTab(_: RefData) {
                     </Select>
                     : <span>{d.gps_radius_m ? `${d.gps_radius_m} m` : t("radius_common", { m: d.effective_m })}</span>}
                 </TableCell>
+                <TableCell>
+                  {isAdmin
+                    ? <FormControlLabel control={<Switch size="small" checked={d.print_manual_confirm !== false} disabled={busy} data-print-mode={d.id}
+                        onChange={(e) => run(() => adminApi.setPrintMode(d.id, e.target.checked))} />}
+                        label={t(d.print_manual_confirm !== false ? "print_mode_manual" : "print_mode_agent")} />
+                    : <span>{t(d.print_manual_confirm !== false ? "print_mode_manual" : "print_mode_agent")}</span>}
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -77,6 +87,7 @@ export function SettingsTab(_: RefData) {
   );
 }
 
+const DIG: Partial<Record<keyof ProviderReq, number>> = { inn: 9, mfo: 5, account: 20, oked: 5 };
 const REQ_FIELDS: { k: keyof ProviderReq; w: number; pattern?: RegExp }[] = [
   { k: "full_name", w: 2 }, { k: "inn", w: 1, pattern: /^\d{9}$/ }, { k: "address", w: 2 }, { k: "phone", w: 1 }, { k: "bank", w: 2 },
   { k: "mfo", w: 1, pattern: /^\d{5}$/ }, { k: "account", w: 2, pattern: /^\d{20}$/ }, { k: "oked", w: 1, pattern: /^\d{4,5}$/ },
@@ -113,7 +124,8 @@ function Requisites({ isAdmin }: { isAdmin: boolean }) {
             <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" } }}>
               {REQ_FIELDS.map((f) => (
                 <TextField key={f.k} size="small" label={t(`req_${f.k}` as MessageKey)} value={(p[f.k] as string | null) ?? ""} disabled={!isAdmin}
-                  name={f.k} onChange={(e) => set(p.id, f.k, e.target.value)} sx={{ gridColumn: { md: `span ${f.w}` } }}
+                  name={f.k} onChange={(e) => set(p.id, f.k, f.pattern ? onlyDigits(e.target.value, DIG[f.k] ?? 20) : e.target.value)}
+                  inputProps={f.pattern ? { inputMode: "numeric", maxLength: DIG[f.k] } : undefined} sx={{ gridColumn: { md: `span ${f.w}` } }}
                   error={!!(f.pattern && p[f.k] && !f.pattern.test(String(p[f.k])))} />
               ))}
             </Box>

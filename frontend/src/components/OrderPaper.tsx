@@ -111,23 +111,37 @@ export function OrderPaperDialog({ formId, onClose, onChanged }: { formId: numbe
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { load(); }, [formId]);
 
+  const [asked, setAsked] = useState(false);
   const doPrint = async () => {
     setBusy(true);
-    try { await printBlob(await ordersApi.print(formId)); toast(t("of_printed")); await load(); onChanged?.(); } catch (e) { fail(e); }
+    try { await printBlob(await ordersApi.print(formId)); await load(); onChanged?.(); setAsked(true); } catch (e) { fail(e); }
+    finally { setBusy(false); }
+  };
+  const confirm = async () => {
+    setBusy(true);
+    try { await ordersApi.confirmPrint(formId); toast(t("of_confirmed_ok")); onChanged?.(); onClose(); } catch (e) { fail(e); }
     finally { setBusy(false); }
   };
   const allow = async () => {
     try { await ordersApi.allowReprint(formId); toast(t("saved")); await load(); onChanged?.(); } catch (e) { fail(e); }
   };
   const f = p?.form;
-  const canPrint = !!f && can("orders.print") && !f.closed_at && (!f.printed || f.reprint_allowed);
+  // Printerdan chiqqani tasdiqlanmaguncha — o'sha raqam bilan erkin qayta chop etiladi
+  const canPrint = !!f && can("orders.print") && !f.closed_at && (!f.printed || f.reprint_allowed || !!p?.awaiting_print);
+  const waiting = !!p?.awaiting_print && !!f?.printed;
 
   return (
     <Dialog open onClose={onClose} maxWidth="lg" fullWidth>
       <DialogTitle>{t("of_title")} № {f?.number ?? ""}</DialogTitle>
       <DialogContent dividers sx={{ bgcolor: "#f1efe9" }}>
         {!p ? <Stack alignItems="center" sx={{ py: 6 }}><CircularProgress /></Stack> : <>
-          {f?.printed && !f.reprint_allowed && <Alert severity="info" sx={{ mb: 2 }} id="of-printed-info">
+          {waiting && <Alert severity="warning" sx={{ mb: 2 }} id="of-await-confirm"
+            action={p?.manual_confirm && can("orders.print") ? <Stack direction="row" spacing={1}>
+              <Button id="of-confirm" color="success" variant="contained" disableElevation size="small" disabled={busy} onClick={confirm}>{t("of_confirm_yes")}</Button>
+              <Button id="of-reprint" color="inherit" size="small" disabled={busy} onClick={doPrint}>{t("of_confirm_no")}</Button>
+            </Stack> : undefined}>
+            <b>{t(p?.manual_confirm ? "of_confirm_q" : "of_wait_agent")}</b>{asked ? "" : ` ${t("of_confirm_hint")}`}</Alert>}
+          {f?.printed && !f.reprint_allowed && !waiting && <Alert severity="info" sx={{ mb: 2 }} id="of-printed-info">
             {t("of_already_printed", { at: f.printed_at ? formatDateTime(new Date(f.printed_at + "Z")) : "", n: f.print_count })}</Alert>}
           {f?.reprint_allowed && <Alert severity="warning" sx={{ mb: 2 }}>{t("of_reprint_allowed")}</Alert>}
           <PaperSheet p={p} />
@@ -139,7 +153,7 @@ export function OrderPaperDialog({ formId, onClose, onChanged }: { formId: numbe
           <Button id="of-allow-reprint" onClick={allow} sx={{ mr: "auto" }}>{t("of_allow_reprint")}</Button>}
         <Button onClick={onClose}>{t("close")}</Button>
         {can("orders.print") && <Button id="of-print" variant="contained" disableElevation startIcon={<PrintIcon />} disabled={!canPrint || busy}
-          onClick={doPrint}>{t("of_print")}</Button>}
+          onClick={doPrint}>{t(waiting ? "of_print_again" : "of_print")}</Button>}
       </DialogActions>
     </Dialog>
   );

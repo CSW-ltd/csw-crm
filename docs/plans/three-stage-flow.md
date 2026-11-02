@@ -65,3 +65,11 @@ Foydalanuvchi bilan 2026-10-30 da grill-me savollari orqali kelishildi. PR #12 d
 - Hisob-kitob faqat buxgalter tasdig'idan keyin.
 - Shartnomada yillik hajm va summa jadvali (QQS 12% ichida, summa so'z bilan).
 - Keyingi: «Qo'shimcha kelishuv» (hajm/tarif o'zgarishi), Didox / hujjat.uz / my.soliq integratsiyasi.
+
+## PR #18–#20 qarorlari (2026-11-02)
+- Varaqa printerdan chiqqani tasdiqlanmaguncha murojaat qizil; tasdiq — printer agenti (PR #20), hozircha agentsiz rejim (tuman bo'yicha).
+- Ta'rif: viloyat → tuman/shahar, sanadan; manager o'z tumanlari, admin hammasi va qulf. Hisob — varaqa yopilgan kundagi ta'rif.
+- Mavjud shartnomalar: bittalab + Excel; darhol tasdiqlangan.
+- PR #19: bir xil STIR — bosh kompaniya; xarita nuqtasi (30 m) va telefon bo'yicha takror; maktab/bog'cha — hududiy boshqarma
+  (ochiq manbalardan, tekshirish kerak); takrorlar — buxgalter va manager Vaziyat paneliga.
+- PR #20: printer agenti (Windows/Linux, USB va tarmoq printer).

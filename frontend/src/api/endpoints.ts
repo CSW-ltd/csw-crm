@@ -1,7 +1,7 @@
 import { api } from "./client";
 import { clearTokens, saveTokens, type Tokens } from "@/lib/session";
 import { closeSocket } from "@/lib/socket";
-import type { ContractCheck, ContractDraft, ContractItem, InvoiceItem, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
+import type { ContractCheck, ContractDraft, ContractItem, ExistingContract, ExistingImportResult, TariffOverview, InvoiceItem, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
   ImportBatch, ImportResult, LocationStatus, Region, Role, SituationEvent, SituationLevel, User } from "@/types";
 
 export const gpsApi = {
@@ -48,6 +48,7 @@ export const adminApi = {
   settings: () => api.get<Settings>("/admin/settings").then((r) => r.data),
   saveSettings: (gps_radius_m: number) => api.put<Settings>("/admin/settings", { gps_radius_m }).then((r) => r.data),
   saveDistrictRadius: (id: number, gps_radius_m: number | null) => api.put<Settings>(`/admin/districts/${id}/radius`, { gps_radius_m }).then((r) => r.data),
+  setPrintMode: (id: number, manual: boolean) => api.put<Settings>(`/admin/districts/${id}/print-mode`, { manual }).then((r) => r.data),
   approveUser: (id: number) => api.post<AdminUser>(`/admin/users/${id}/approve`).then((r) => r.data),
   rejectUser: (id: number) => api.post<AdminUser>(`/admin/users/${id}/reject`).then((r) => r.data),
   permissionCatalog: () => api.get<{ modules: Record<string, string[]> }>("/admin/permissions/catalog").then((r) => r.data),
@@ -167,6 +168,7 @@ export const ordersApi = {
   /** PDF faqat chop etish uchun (maxfiy kod shu faylda) — ekranda ko'rsatilmaydi */
   print: (id: number) => api.post<Blob>(`/order-forms/${id}/print`, null, { responseType: "blob", timeout: 60_000 }).then((r) => r.data),
   allowReprint: (id: number) => api.post<OrderFormBrief>(`/order-forms/${id}/allow-reprint`).then((r) => r.data),
+  confirmPrint: (id: number) => api.post<{ request_id: number; status: string; form: OrderFormBrief }>(`/order-forms/${id}/confirm-print`).then((r) => r.data),
   unlock: (id: number) => api.post<OrderFormBrief>(`/order-forms/${id}/unlock`).then((r) => r.data),
   uploadScan: (id: number, file: File) => {
     const fd = new FormData();
@@ -222,6 +224,20 @@ export const providersApi = {
 export const contractsApi = {
   check: (body: ContractDraft, id?: number) => api.post<ContractCheck>(id ? `/contracts/${id}/check` : "/contracts/check", body).then((r) => r.data),
   create: (body: ContractDraft) => api.post<ContractItem>("/contracts", body).then((r) => r.data),
+  start: (customer_id: number) => api.post<ContractItem>("/contracts/start", { customer_id }).then((r) => r.data),
+  saveDraft: (id: number, body: ContractDraft) => api.put<ContractItem>(`/contracts/${id}/draft`, body).then((r) => r.data),
+  createExisting: (body: ExistingContract) => api.post<ContractItem>("/contracts/existing", body).then((r) => r.data),
+  existingTemplate: () => api.get<Blob>("/contracts/existing/template", { responseType: "blob" }).then((r) => r.data),
+  importExisting: (file: File, dry_run: boolean) => {
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    return api.post<ExistingImportResult>("/contracts/existing/import", fd, { params: { dry_run }, timeout: 180_000 }).then((r) => r.data);
+  },
+  uploadScan: (id: number, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    return api.post<ContractItem>(`/contracts/${id}/scan-upload`, fd, { timeout: 60_000 }).then((r) => r.data);
+  },
   update: (id: number, body: ContractDraft) => api.put<ContractItem>(`/contracts/${id}`, body).then((r) => r.data),
   remove: (id: number) => api.delete(`/contracts/${id}`),
   get: (id: number) => api.get<ContractItem>(`/contracts/${id}`).then((r) => r.data),
@@ -241,4 +257,13 @@ export const contractsApi = {
   },
   approve: (id: number) => api.post<ContractItem>(`/contracts/${id}/approve`).then((r) => r.data),
   returnBack: (id: number, comment: string) => api.post<ContractItem>(`/contracts/${id}/return`, { comment }).then((r) => r.data),
+};
+
+export const tariffsApi = {
+  overview: () => api.get<TariffOverview>("/tariffs").then((r) => r.data),
+  price: (district_id: number, day?: string) => api.get<{ price: number | null }>("/tariffs/price", { params: { district_id, day } }).then((r) => r.data),
+  set: (body: { region_id?: number; district_id?: number; price: number; valid_from: string; note?: string | null }) =>
+    api.post("/tariffs", body).then((r) => r.data),
+  remove: (id: number) => api.delete(`/tariffs/${id}`),
+  lock: (body: { region_id?: number; district_id?: number; locked: boolean }) => api.put("/tariffs/lock", body),
 };

@@ -3,7 +3,8 @@ import io
 from datetime import date, timedelta
 
 from docx import Document
-from sqlalchemy import update
+import pytest
+from sqlalchemy import select, update
 
 from app.db.base import utcnow
 from app.models import OrderForm, Request
@@ -13,6 +14,16 @@ from app.models.enums import ContractType
 from tests.test_accounting import _setup
 
 T = date.today()
+
+
+@pytest.fixture(autouse=True)
+async def tariffs(world, sessionmaker):
+    """Ikkala viloyatga ta'rif: 84 000 so'm/m³ (QQS bilan)."""
+    from app.models import District, Tariff
+    async with sessionmaker() as s:
+        for rid in {d.region_id for d in (await s.execute(select(District))).scalars()}:
+            s.add(Tariff(region_id=rid, price=84000, valid_from=date(T.year - 1, 1, 1)))
+        await s.commit()
 REQ = {"name": "\"Yangi Test\" MChJ", "stir": "309111222", "director": "Aliyev Vali", "phone": "90 123 45 67",
        "legal_address": "Asaka sh., Bog'bon ko'chasi 5", "address": "Asaka sh., Bog'bon ko'chasi 5", "bank": "DEMO bank",
        "mfo": "00873", "account": "20208000900123456001", "oked": "56290", "cadastre": "17:15:41:01:02:0001"}
@@ -88,8 +99,8 @@ async def test_full_flow(world, client_factory, sessionmaker):
     # Qaytarish (izoh bilan) → legal tuzatadi → qayta yuboradi → tasdiq
     r = (await acc.post(f"/api/v1/contracts/{ct['id']}/return", json={"comment": "Narx noto'g'ri"})).json()
     assert r["status"] == "returned" and r["return_comment"] == "Narx noto'g'ri" and r["is_active"]
-    r = await legal.put(f"/api/v1/contracts/{ct['id']}", json=body(cid, price=90000))
-    assert r.status_code == 200 and r.json()["price"] == 90000
+    r = await legal.put(f"/api/v1/contracts/{ct['id']}", json=body(cid, annual_volume=120))
+    assert r.status_code == 200 and r.json()["price"] == 84000 and r.json()["annual_volume"] == 120
     r = (await legal.post(f"/api/v1/contracts/{ct['id']}/sign", data={**sign, "platform_id": "e0f94e102ced"})).json()
     assert r["status"] == "signed" and r["return_comment"] is None
     r = (await acc.post(f"/api/v1/contracts/{ct['id']}/approve")).json()

@@ -16,6 +16,7 @@ import type { InvoiceItem, MonthForm, MonthFormCustomer } from "@/types";
 import type { RefData } from "./AdminHome";
 import { fmtM3, fmtMoney } from "./CompaniesTab";
 import { UsageBar } from "./ContractsTab";
+import { usePersisted } from "@/hooks/usePersisted";
 
 /** "YYYY-MM" — Toshkent vaqti bo'yicha; shift = -1 o'tgan oy */
 export const monthIso = (shift = 0) => {
@@ -43,7 +44,7 @@ async function openPdf(id: number, fail: (e: unknown) => void) {
 /** Buxgalteriya «Buyurtma varaqalari»: oy ichida yashil bo'lgan har bir varaqa — summasi amaldagi shartnoma bo'yicha (kub yoki reys). */
 export function OrderFormsTab({ districts }: RefData) {
   const { t, tErr } = useI18n();
-  const [month, setMonth] = useState(monthIso());
+  const [month, setMonth] = usePersisted("of.month", monthIso());
   const [district, setDistrict] = useState<number | "">("");
   const [customer, setCustomer] = useState<number | "">("");
   const [data, setData] = useState<{ items: MonthForm[]; customers: MonthFormCustomer[]; total: number; count: number } | null>(null);
@@ -136,7 +137,7 @@ export function OrderFormsTab({ districts }: RefData) {
 export function InvoicesTab({ districts }: RefData) {
   const { t, tErr } = useI18n();
   const can = useCan();
-  const [month, setMonth] = useState(monthIso(-1));
+  const [month, setMonth] = usePersisted("inv.month", monthIso(-1));
   const [data, setData] = useState<{ items: InvoiceItem[]; total: number; drafts: number; sent: number } | null>(null);
   const [ask, setAsk] = useState<"generate" | "send" | null>(null);
   const [busy, setBusy] = useState(false);

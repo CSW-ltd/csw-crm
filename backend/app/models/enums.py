@@ -19,6 +19,7 @@ class ShiftStatus(str, Enum):
 
 class RequestStatus(str, Enum):
     new = "new"
+    printing = "printing"    # mashina biriktirildi, buyurtma varaqasi printerdan chiqishi kutilmoqda (karta hali qizil)
     assigned = "assigned"
     enroute = "enroute"
     onsite = "onsite"
@@ -81,7 +82,7 @@ class AppealStatus(str, Enum):
 # Bajarilgan hisoblanadigan holatlar (statistika va 72 soat): "suspect" ham yakunlangan dalolatnoma
 DONE_STATUSES = ("done", "suspect")
 # Hali bajarilmagan (kutilmoqda yoki muddati o'tgan)
-OPEN_STATUSES = ("new", "assigned", "enroute", "onsite", "failed")
+OPEN_STATUSES = ("new", "printing", "assigned", "enroute", "onsite", "failed")
 
 
 class SituationLevel(str, Enum):

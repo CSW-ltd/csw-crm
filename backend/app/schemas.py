@@ -99,6 +99,7 @@ class DistrictOut(ORM):
     region_id: int
     is_active: bool
     gps_radius_m: int | None = None
+    print_manual_confirm: bool = True  # agentsiz rejim: GPS «Varaqa chiqdi»ni o'zi tasdiqlaydi
 
 
 class DistrictIn(BaseModel):
@@ -137,6 +138,7 @@ class DistrictRadiusOut(BaseModel):
     name: str
     gps_radius_m: int | None  # o'z qiymati; None — umumiy
     effective_m: int
+    print_manual_confirm: bool = True
 
 
 class SettingsOut(BaseModel):
@@ -230,7 +232,7 @@ class CustomerOut(ORM):
 
 class ContractOut(ORM):
     id: int
-    number: str
+    number: str | None
     signed_on: date | None
     type: ContractType
 
@@ -359,6 +361,7 @@ class CustomerDetailOut(CustomerListOut):
     account: str | None = None
     oked: str | None = None
     cadastre: str | None = None
+    is_rented: bool = False
     contacts: list[ContactOut]
     contracts: list[ContractFullOut]
     created_at: datetime

@@ -14,15 +14,16 @@ import { RequestChips, STATUS_COLOR } from "@/pages/operator/OperatorHome";
 import { WASTE_TYPES } from "@/pages/operator/OrderFields";
 import type { RequestDetail, RequestItem, RequestStatus } from "@/types";
 import { districtLabel, type RefData } from "./AdminHome";
+import { usePersisted } from "@/hooks/usePersisted";
 
-const STATUSES: RequestStatus[] = ["new", "assigned", "enroute", "onsite", "done", "suspect", "failed", "cancelled"];
+const STATUSES: RequestStatus[] = ["new", "printing", "assigned", "enroute", "onsite", "done", "suspect", "failed", "cancelled"];
 const dt = (s: string | null | undefined) => (s ? formatDateTime(new Date(s + "Z")) : "—");
 
 /** Arizalar ro'yxati (admin — hammasi, manager — o'z tumanlari): filtrlar, "Yangi" belgisi, karta + tarix, bekor qilish. */
 export function RequestsTab({ districts }: RefData) {
   const { t, tErr } = useI18n();
   const [status, setStatus] = useState<RequestStatus | "">("");
-  const [district, setDistrict] = useState<number | "">("");
+  const [district, setDistrict] = usePersisted<number | "">("req.district", "");
   const [waste, setWaste] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");

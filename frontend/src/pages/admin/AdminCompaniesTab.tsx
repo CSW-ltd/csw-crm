@@ -14,6 +14,7 @@ import { CompaniesTab } from "./CompaniesTab";
 import { ContractWizard } from "./ContractWizard";
 import { CustomersTab } from "./CustomersTab";
 import { ImportDialog } from "./ImportDialog";
+import { usePersisted } from "@/hooks/usePersisted";
 
 const PERIODS: NewPeriod[] = ["d7", "d15", "m1", "m6", "y1"];
 type NC = Awaited<ReturnType<typeof accountingApi.newContracts>>;
@@ -25,8 +26,8 @@ type NC = Awaited<ReturnType<typeof accountingApi.newContracts>>;
 export function AdminCompaniesTab(ref: RefData) {
   const { t, tErr } = useI18n();
   const can = useCan();
-  const [sub, setSub] = useState<"stats" | "base">("stats");
-  const [district, setDistrict] = useState<number | "">("");
+  const [sub, setSub] = usePersisted<"stats" | "base">("cmp.sub", "stats");
+  const [district, setDistrict] = usePersisted<number | "">("cmp.district", "");
   const [nc, setNc] = useState<NC | null>(null);
   const [period, setPeriod] = useState<NewPeriod>("m1");
   const [creating, setCreating] = useState(false);

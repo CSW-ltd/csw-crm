@@ -11,6 +11,7 @@ import { toast } from "@/lib/alerts";
 import { formatDateTime } from "@/lib/format";
 import type { StatMetrics, Stats } from "@/types";
 import type { RefData } from "./AdminHome";
+import { usePersisted } from "@/hooks/usePersisted";
 
 const METRICS: StatMetric[] = ["received", "repeat", "pending", "overdue", "done", "not_done"];
 const SHARE: Partial<Record<StatMetric, keyof StatMetrics>> = { done: "done_share", not_done: "not_done_share" };
@@ -55,7 +56,7 @@ function CountUp({ value, reduced }: { value: number; reduced: boolean }) {
 
 function ChartCard({ id, title, subtitle, chart, table }: { id: string; title: string; subtitle?: string; chart: ReactNode; table: ReactNode }) {
   const { t } = useI18n();
-  const [view, setView] = useState<"chart" | "table">("chart");
+  const [view, setView] = usePersisted<"chart" | "table">("stats.view", "chart");
   return (
     <Paper variant="outlined" sx={{ p: 2, minWidth: 0 }} id={id}>
       <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1} sx={{ mb: 1 }}>
@@ -93,8 +94,8 @@ export function StatsTab(_: RefData) {
   const { mode, systemMode } = useColorScheme();
   const c = COLORS[(mode === "system" ? systemMode : mode) === "dark" ? "dark" : "light"];
   const reduced = useReducedMotion();
-  const [period, setPeriod] = useState<StatPeriod>("today");
-  const [metric, setMetric] = useState<StatMetric>("received");
+  const [period, setPeriod] = usePersisted<StatPeriod>("stats.period", "today");
+  const [metric, setMetric] = usePersisted<StatMetric>("stats.metric", "received");
   const [data, setData] = useState<Stats | null>(null);
   const [detail, setDetail] = useState<StatDetail | null>(null);
   const [exporting, setExporting] = useState<"" | "xlsx" | "pdf">("");

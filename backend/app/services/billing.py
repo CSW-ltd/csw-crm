@@ -49,6 +49,7 @@ class Green:
     contract: Contract | None
     amount: Decimal
     pending: Contract | None = None  # imzolangan, lekin buxgalter hali tasdiqlamagan shartnoma (hisobga kirmaydi)
+    unit_price: Decimal | None = None  # kub — o'sha kundagi ta'rif (bo'lmasa shartnoma narxi), reys — shartnoma narxi
 
 
 def _months(start: date, end: date):
@@ -69,7 +70,7 @@ def contract_for(contracts: list[Contract], req: Request, day: date) -> Contract
 class Ledger:
     """Bir nechta korxona uchun hisob-kitob ma'lumotlari (bazadan bir martada yuklanadi)."""
 
-    def __init__(self, customers: list[Customer], contracts, greens, volumes, payments, today: date):
+    def __init__(self, customers: list[Customer], contracts, greens, volumes, payments, today: date, tariffs=None):
         self.customers = {c.id: c for c in customers}
         # Hisob-kitob faqat buxgalter tasdiqlagan shartnomalar bo'yicha; imzolangan-tasdiqlanmaganlari — «kutilmoqda»
         self.contracts: dict[int, list[Contract]] = defaultdict(list)
@@ -90,13 +91,19 @@ class Ledger:
             pend = None if ct else contract_for(self.pending[r.customer_id], r, day) if self.pending[r.customer_id] else None
             if pend and not (pend.valid_from <= day <= pend.valid_to) and r.contract_id != pend.id:
                 pend = None
-            amount = ZERO
-            if ct and ct.price is not None:
-                if ct.type == ContractType.per_trip:
-                    amount = money(ct.price)
-                elif ct.type == ContractType.by_volume:
-                    amount = money(Decimal(str(ct.price)) * vol)
-            self.greens[r.customer_id].append(Green(r, day, vol, via, ct, amount, pend))
+            amount, unit = ZERO, None
+            if ct and ct.type == ContractType.by_volume:
+                # Kub narxi — davlat ta'rifi (varaqa yopilgan kundagi, tuman → viloyat); ta'rif kiritilmagan bo'lsa — shartnoma narxi
+                cust = self.customers.get(r.customer_id)
+                unit = tariffs.price(cust.district_id, day) if tariffs is not None and cust else None
+                if unit is None and ct.price is not None:
+                    unit = Decimal(str(ct.price))
+                if unit is not None:
+                    amount = money(unit * vol)
+            elif ct and ct.type == ContractType.per_trip and ct.price is not None:
+                unit = Decimal(str(ct.price))
+                amount = money(unit)
+            self.greens[r.customer_id].append(Green(r, day, vol, via, ct, amount, pend, unit))
             if ct or pend:
                 self.usage[(ct or pend).id] += vol
             if amount:
@@ -150,7 +157,9 @@ async def load(db: AsyncSession, customers: list[Customer]) -> Ledger:
         if vol is not None and rid not in volumes:
             volumes[rid] = (Decimal(str(vol)), via or "form")
     payments = list((await db.execute(select(Payment).where(Payment.customer_id.in_(ids), Payment.cancelled_at.is_(None)))).scalars())
-    return Ledger(customers, contracts, greens, volumes, payments, local_day(datetime.now(timezone.utc).replace(tzinfo=None)))
+    from app.services.tariffs import book
+    return Ledger(customers, contracts, greens, volumes, payments, local_day(datetime.now(timezone.utc).replace(tzinfo=None)),
+                  await book(db))
 
 
 async def scoped_customers(db: AsyncSession, actor: User, only_contracted: bool = True, customer_id: int | None = None,
@@ -279,7 +288,7 @@ def month_lines(led: Ledger, cid: int, month: date) -> list[dict]:
         desc = f"Chiqindi olib ketish: {g.request.number}" + (f", varaqa {form_no}" if form_no else "")
         if ct and ct.type == ContractType.by_volume:
             lines.append({"kind": "form", "request_id": g.request.id, "day": g.day, "description": desc, "qty": g.volume, "unit": "m³",
-                          "price": money(ct.price), "amount": g.amount})
+                          "price": money(g.unit_price), "amount": g.amount})
         elif ct and ct.type == ContractType.per_trip:
             lines.append({"kind": "form", "request_id": g.request.id, "day": g.day, "description": desc + f" ({g.volume} m³)", "qty": Decimal(1),
                           "unit": "reys", "price": money(ct.price), "amount": g.amount})
@@ -317,7 +326,8 @@ async def month_forms(db: AsyncSession, actor: User, month: date, district_id: i
                           "volume_m3": float(g.volume), "waste_kind": g.request.order_form.waste_kind if getattr(g.request, "order_form", None) else None,
                           "plate": g.request.vehicle.plate if g.request.vehicle else None, "closed_via": g.closed_via,
                           "contract": ct.display_number if ct else None, "contract_type": ct.type.value if ct else None,
-                          "price": float(ct.price) if ct and ct.price is not None else None, "amount": float(g.amount),
+                          "price": float(g.unit_price) if g.unit_price is not None else (float(ct.price) if ct and ct.price is not None else None),
+                          "amount": float(g.amount),
                           "pending": g.pending is not None})
         lines = month_lines(led, c.id, month)
         total = sum((x["amount"] for x in lines), ZERO)

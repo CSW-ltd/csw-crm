@@ -18,7 +18,7 @@ const phoneDigits = (v: string) => { const d = v.replace(/\D/g, ""); return d.le
 
 /** Status chipi rangi */
 export const STATUS_COLOR: Record<string, "default" | "info" | "success" | "warning" | "error"> = {
-  new: "info", assigned: "info", enroute: "info", onsite: "info", done: "success", suspect: "warning", failed: "error", cancelled: "default",
+  new: "info", printing: "warning", assigned: "info", enroute: "info", onsite: "info", done: "success", suspect: "warning", failed: "error", cancelled: "default",
 };
 
 export function RequestChips({ r }: { r: Pick<RequestItem, "is_repeat" | "overdue" | "waste_type"> }) {
@@ -170,7 +170,7 @@ export function OperatorHome() {
             <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", sm: "1fr 1fr" } }}>
               <TextField id="nc-phone" size="small" label={t("phone")} value={nc.phone} onChange={(e) => setNc({ ...nc, phone: e.target.value })}
                 placeholder="94 512 11 16" />
-              <TextField id="nc-stir" size="small" label={t("stir")} value={nc.stir} onChange={(e) => { setNc({ ...nc, stir: e.target.value.replace(/\D/g, "") }); setTaken(null); }}
+              <TextField id="nc-stir" size="small" label={t("stir")} value={nc.stir} onChange={(e) => { setNc({ ...nc, stir: e.target.value.replace(/\D/g, "").slice(0, 9) }); setTaken(null); }}
                 slotProps={{ htmlInput: { inputMode: "numeric", maxLength: 9 } }} error={!!taken} />
               <TextField id="nc-contact" size="small" label={t("receiver_name")} value={nc.contact_name}
                 onChange={(e) => setNc({ ...nc, contact_name: e.target.value })} sx={{ gridColumn: { sm: "1 / -1" } }} />

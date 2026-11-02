@@ -16,6 +16,7 @@ import { getSocket } from "@/lib/socket";
 import type { RequestItem } from "@/types";
 import type { RefData } from "./AdminHome";
 import { RequestDialog } from "./RequestsTab";
+import { usePersisted } from "@/hooks/usePersisted";
 
 type Color = "red" | "black" | "yellow" | "green";
 const COLORS: Color[] = ["red", "black", "yellow", "green"];
@@ -30,11 +31,11 @@ export function MurojaatBoard({ districts }: RefData) {
   const { t, tErr } = useI18n();
   const can = useCan();
   const now = useNow();
-  const [hours, setHours] = useState<(typeof HOURS)[number]>(72);
+  const [hours, setHours] = usePersisted<(typeof HOURS)[number]>("board.hours", 72);
   const [sum, setSum] = useState<Record<Color, number> | null>(null);
   const [color, setColor] = useState<Color | "">("");
   const role = useAppSelector((st) => st.auth.user?.role);
-  const [district, setDistrict] = useState<number | "">("");
+  const [district, setDistrict] = usePersisted<number | "">("board.district", "");
   const [q, setQ] = useState("");
   const [query, setQuery] = useState("");
   const [items, setItems] = useState<RequestItem[]>([]);

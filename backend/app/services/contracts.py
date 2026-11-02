@@ -5,6 +5,7 @@ draft (forma saqlandi, ichki raqam berildi; hujjat PDF/DOCX)
   → approved (buxgalter tasdiqladi — faktura va debitorga kiradi)
 signed → returned (buxgalter izoh bilan qaytardi; faol qoladi, hisobga kirmaydi) → legal tuzatadi → signed (qayta yuborildi)
 """
+import json
 import re
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
@@ -21,7 +22,7 @@ from app.core.errors import AppError, conflict, invalid, not_found
 from app.db.base import utcnow
 from app.models import Contract, ContractEvent, Customer, District, Provider, User
 from app.models.enums import ContractType
-from app.services import access, billing, contract_templates
+from app.services import access, billing, contract_templates, tariffs
 from app.services.billing import local_day
 from app.services.customer_service import _check_stir
 from app.services.invoice_pdf import words_uz
@@ -47,6 +48,7 @@ class Requisites(BaseModel):
     account: str | None = Field(None, max_length=20)
     oked: str | None = Field(None, max_length=10)
     cadastre: str | None = Field(None, max_length=40)
+    is_rented: bool = False  # obyekt ijarada (shartnoma 10.3-bandi)
 
 
 class ContractDraftIn(BaseModel):
@@ -134,8 +136,12 @@ async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id:
         errs.append(_err("mfo", "mfo"))
     if r.oked and not re.fullmatch(r"\d{4,5}", r.oked):
         errs.append(_err("oked", "oked"))
-    if not body.price or body.price <= 0:
-        errs.append(_err("price", "required"))
+    if body.type != ContractType.by_volume:
+        errs.append(_err("type", "type_volume_only"))  # yangi shartnoma — faqat kub (ta'rif); reys/oylik — mavjud shartnomani kiritishda
+    # Narx — davlat ta'rifi (shartnoma boshlanish sanasidagi, tuman → viloyat); qo'lda kiritilmaydi
+    body.price = await tariffs.price_for(db, cust.district_id, body.valid_from or local_day(utcnow()))
+    if not body.price:
+        errs.append(_err("price", "no_tariff"))
     if body.type == ContractType.by_volume and not (body.annual_volume and body.annual_volume > 0):
         errs.append(_err("annual_volume", "required"))
     if body.type == ContractType.per_trip and not body.annual_trips:
@@ -160,7 +166,8 @@ async def check(db: AsyncSession, actor: User, body: ContractDraftIn, own_id: in
     _, errs = await validate(db, actor, body, own_id)
     t = totals(body.type, body.price, body.annual_volume, body.annual_trips, body.valid_from, body.valid_to)
     return {"ok": not errs, "errors": errs, "totals": {"qty": float(t["qty"]), "unit": t["unit"], "net": float(t["net"]), "vat": float(t["vat"]),
-                                                      "total": float(t["total"]), "words": money_words(t["total"])}}
+                                                      "total": float(t["total"]), "words": money_words(t["total"]),
+                                                      "price": float(body.price) if body.price else None}}
 
 
 def _raise(errs: list[dict]) -> None:
@@ -189,6 +196,8 @@ def _apply(cust: Customer, ct: Contract, body: ContractDraftIn) -> None:
     cust.phone = format_phone(r.phone)
     for f in ("director", "legal_address", "address", "bank", "mfo", "account", "oked", "cadastre"):
         setattr(cust, f, (getattr(r, f) or "").strip() or None)
+    cust.is_rented = r.is_rented
+    ct.draft_data = None
     ct.type, ct.price, ct.annual_volume, ct.annual_trips = body.type, body.price, body.annual_volume, body.annual_trips
     ct.valid_from, ct.valid_to, ct.place, ct.sign_method = body.valid_from, body.valid_to, (body.place or "").strip(), body.sign_method
 
@@ -236,7 +245,39 @@ async def update(db: AsyncSession, actor: User, contract_id: int, body: Contract
     cust, errs = await validate(db, actor, body, own_id=ct.id)
     _raise(errs)
     _apply(cust, ct, body)
+    if not ct.number:  # tugallanmagan loyiha — raqam tekshiruvdan o'tgach beriladi
+        prov = await _provider(db, cust.district_id)
+        ct.number = await next_number(db, prov.code if prov else "SH", body.valid_from.year)
     _event(ct, actor, "edited")
+    await db.commit()
+    return await get(db, actor, ct.id)
+
+
+async def start(db: AsyncSession, actor: User, customer_id: int) -> Contract:
+    """Usta: korxona tanlangan zahoti tugallanmagan loyiha (raqamsiz) — «Tugallanmagan shartnomalar»da qoladi."""
+    cust = await db.get(Customer, customer_id)
+    if not cust:
+        raise not_found("customer")
+    access.check_scope(actor, cust.district_id)
+    today = local_day(utcnow())
+    ct = Contract(customer_id=cust.id, number=None, status="draft", is_active=False, created_by_id=actor.id, events=[],
+                  type=ContractType.by_volume, valid_from=today, valid_to=date(today.year, 12, 31))
+    _event(ct, actor, "created")
+    db.add(ct)
+    await db.commit()
+    return await get(db, actor, ct.id)
+
+
+async def save_draft(db: AsyncSession, actor: User, contract_id: int, body: ContractDraftIn) -> Contract:
+    """Usta yopilganda yoki «Orqaga»: forma tekshiruvsiz saqlanadi (korxona kartasiga emas — loyihaga)."""
+    ct = await _own(db, actor, contract_id, lock=True)
+    if ct.status not in ("draft", "returned"):
+        raise conflict("contract_locked", "Shartnoma imzolangan")
+    ct.draft_data = body.model_dump_json(exclude={"customer_id"})
+    if body.valid_from and body.valid_to and body.valid_to >= body.valid_from:
+        ct.valid_from, ct.valid_to = body.valid_from, body.valid_to
+    if body.annual_volume is not None:
+        ct.annual_volume = body.annual_volume
     await db.commit()
     return await get(db, actor, ct.id)
 
@@ -254,6 +295,8 @@ async def sign(db: AsyncSession, storage: Storage, actor: User, contract_id: int
     ct = await _own(db, actor, contract_id, lock=True)
     if ct.status not in ("draft", "returned"):
         raise conflict("contract_locked", "Shartnoma allaqachon imzolangan")
+    if not ct.number or ct.draft_data:
+        raise conflict("contract_incomplete", "Avval ma'lumotlarni tekshirib, saqlang")
     if method not in ("electronic", "paper"):
         raise invalid("bad_sign_method", "Imzo usuli: elektron yoki qog'oz")
     if signed_on > local_day(utcnow()):
@@ -266,20 +309,31 @@ async def sign(db: AsyncSession, storage: Storage, actor: User, contract_id: int
         if dup:
             raise conflict("platform_id_taken", "Bu platforma ID boshqa shartnomada bor")
     if file:
-        data, ctype, name = file
-        ctype = (ctype or "").split(";")[0].strip().lower()
-        if ctype not in SCAN_TYPES:
-            raise invalid("bad_scan", "Fayl: PDF, JPG yoki PNG")
-        if not data or len(data) > get_settings().max_upload_mb * 1024 * 1024:
-            raise invalid("file_too_large", f"Fayl bo'sh yoki {get_settings().max_upload_mb} MB dan katta")
-        key = f"contracts/{ct.id}/{uuid4().hex}.{SCAN_TYPES[ctype]}"
-        await run_in_threadpool(storage.put, key, data, ctype)
-        ct.scan_key, ct.scan_type, ct.scan_name = key, ctype, (name or "")[:150] or None
+        await _put_scan(storage, ct, file)
     was_returned = ct.status == "returned"
     ct.status, ct.is_active, ct.signed_on, ct.sign_method = "signed", True, signed_on, method
     ct.platform, ct.platform_id = (platform if method == "electronic" else None), (pid if method == "electronic" else None)
     ct.signed_at, ct.return_comment = utcnow(), None
     _event(ct, actor, "resubmitted" if was_returned else "signed")
+    await db.commit()
+    return await get(db, actor, ct.id)
+
+
+async def _put_scan(storage: Storage, ct: Contract, file: tuple[bytes, str, str]) -> None:
+    data, ctype, name = file
+    ctype = (ctype or "").split(";")[0].strip().lower()
+    if ctype not in SCAN_TYPES:
+        raise invalid("bad_scan", "Fayl: PDF, JPG yoki PNG")
+    if not data or len(data) > get_settings().max_upload_mb * 1024 * 1024:
+        raise invalid("file_too_large", f"Fayl bo'sh yoki {get_settings().max_upload_mb} MB dan katta")
+    key = f"contracts/{ct.id}/{uuid4().hex}.{SCAN_TYPES[ctype]}"
+    await run_in_threadpool(storage.put, key, data, ctype)
+    ct.scan_key, ct.scan_type, ct.scan_name = key, ctype, (name or "")[:150] or None
+
+
+async def attach_scan(db: AsyncSession, storage: Storage, actor: User, contract_id: int, file: tuple[bytes, str, str]) -> Contract:
+    ct = await _own(db, actor, contract_id, lock=True)
+    await _put_scan(storage, ct, file)
     await db.commit()
     return await get(db, actor, ct.id)
 
@@ -355,7 +409,8 @@ def out(ct: Contract, used: float | None = None, with_events: bool = False) -> d
          "created_at": ct.created_at, "total": float(t["total"]), "vat": float(t["vat"]), "is_active": ct.is_active,
          "customer": {"id": c.id, "name": c.name, "code": c.code, "stir": c.stir, "district_id": c.district_id, "director": c.director,
                       "phone": c.phone, "legal_address": c.legal_address, "address": c.address, "bank": c.bank, "mfo": c.mfo,
-                      "account": c.account, "oked": c.oked, "cadastre": c.cadastre} if c else None}
+                      "account": c.account, "oked": c.oked, "cadastre": c.cadastre, "is_rented": c.is_rented} if c else None,
+         "draft": json.loads(ct.draft_data) if ct.draft_data else None, "source": ct.source}
     if used is not None:
         d["used_m3"] = used
         if ct.annual_volume:
@@ -379,7 +434,7 @@ def context(ct: Contract, cust: Customer, prov: Provider | None) -> dict:
     vf, vt = ct.valid_from, ct.valid_to
     p = prov
     return {
-        "number": ct.platform_id or ct.number, "place": _blank(ct.place), "date": (ct.signed_on or ct.valid_from).strftime("%d.%m.%Y"),
+        "number": ct.platform_id or ct.number or "______", "place": _blank(ct.place), "date": (ct.signed_on or ct.valid_from).strftime("%d.%m.%Y"),
         "valid_from": vf.strftime("%d.%m.%Y"), "valid_to": vt.strftime("%d.%m.%Y"),
         "vf_d": f"{vf.day:02d}", "vf_m": f"{vf.month:02d}", "vf_y": str(vf.year), "vt_d": f"{vt.day:02d}", "vt_m": f"{vt.month:02d}", "vt_y": str(vt.year),
         "provider_name": _blank(p.full_name or p.name if p else None), "provider_director": _blank(p.director if p else None),
@@ -392,6 +447,7 @@ def context(ct: Contract, cust: Customer, prov: Provider | None) -> dict:
         "customer_stir": _blank(cust.stir), "customer_oked": _blank(cust.oked), "customer_account": _blank(cust.account),
         "customer_bank": _blank(cust.bank), "customer_mfo": _blank(cust.mfo),
         "object_address": _blank(cust.address or cust.legal_address), "cadastre": _blank(cust.cadastre),
+        "ownership": "ijara" if cust.is_rented else "mulk",
         "qty": f"{t['qty']:,.{qty_dec}f}".replace(",", " "), "unit": t["unit"],
         "unit_net": _fmt(t["unit_net"]), "net": _fmt(t["net"]), "vat": _fmt(t["vat"]), "total": _fmt(t["total"]),
         "total_words": money_words(t["total"]), "price": _fmt(t["price"], 0), "price_words": money_words(t["price"]).split(" so‘m")[0],

@@ -1,30 +1,33 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Autocomplete, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel, IconButton,
-  MenuItem, Paper, Radio, RadioGroup, Stack, Step, StepLabel, Stepper, TextField, Typography, useMediaQuery, useTheme } from "@mui/material";
+import { Alert, Autocomplete, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel, IconButton,
+  MenuItem, Paper, Radio, RadioGroup, Stack, Step, StepLabel, Stepper, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery,
+  useTheme } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
 import FactCheckIcon from "@mui/icons-material/FactCheck";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import DescriptionIcon from "@mui/icons-material/Description";
 import DrawIcon from "@mui/icons-material/Draw";
-import { contractsApi, customersApi } from "@/api/endpoints";
+import { contractsApi, customersApi, tariffsApi } from "@/api/endpoints";
+import { onlyDigits } from "@/components/DigitsField";
 import { errorCode, errorMessage } from "@/api/client";
 import { STAGE } from "@/components/Stage";
 import { useI18n } from "@/i18n/I18nContext";
 import type { MessageKey } from "@/i18n/messages";
 import { toast } from "@/lib/alerts";
-import type { ContractCheck, ContractDraft, ContractItem, ContractType, CustomerListItem, District, Requisites } from "@/types";
+import type { ContractCheck, ContractDraft, ContractItem, CustomerListItem, District, Requisites } from "@/types";
 import { fmtMoney } from "./CompaniesTab";
+import { ExistingContractForm, ExistingImport } from "./ExistingContracts";
 
-const TYPES: ContractType[] = ["by_volume", "per_trip", "monthly"];
 const PLATFORMS = ["didox", "hujjat", "soliq", "other"] as const;
 const todayIso = () => new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
 const yearEnd = () => `${todayIso().slice(0, 4)}-12-31`;
 const EMPTY_REQ: Requisites = { name: "", stir: "", director: "", phone: "", legal_address: "", address: "", bank: "", mfo: "", account: "",
-  oked: "", cadastre: "" };
-const REQ_FIELDS: { k: keyof Requisites; span: number; hint?: string }[] = [
-  { k: "name", span: 2 }, { k: "stir", span: 1, hint: "9" }, { k: "director", span: 2 }, { k: "phone", span: 1 },
+  oked: "", cadastre: "", is_rented: false };
+type ReqText = Exclude<keyof Requisites, "is_rented">;
+const REQ_FIELDS: { k: ReqText; span: number; digits?: number }[] = [
+  { k: "name", span: 2 }, { k: "stir", span: 1, digits: 9 }, { k: "director", span: 2 }, { k: "phone", span: 1 },
   { k: "legal_address", span: 3 }, { k: "address", span: 2 }, { k: "cadastre", span: 1 },
-  { k: "bank", span: 2 }, { k: "mfo", span: 1, hint: "5" }, { k: "account", span: 2, hint: "20" }, { k: "oked", span: 1 },
+  { k: "bank", span: 2 }, { k: "mfo", span: 1, digits: 5 }, { k: "account", span: 2, digits: 20 }, { k: "oked", span: 1, digits: 5 },
 ];
 
 /** Shartnoma o'zgarganda ro'yxatlar yangilanadi (ustani qayerdan ochilganidan qat'i nazar). */
@@ -55,33 +58,59 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   const fail = useCallback((e: unknown) => toast(tErr(errorCode(e), errorMessage(e)), "error"), [tErr]);
   const districtName = (id?: number) => districts.find((d) => d.id === id)?.name ?? "";
 
+  const [tariff, setTariff] = useState<number | null | undefined>(undefined);
+  // Boshlang'ich tanlov: yangi shartnoma tuzish yoki mavjud (imzolangan) shartnomani kiritish (bittalab / Excel)
+  const [mode, setMode] = useState<"new" | "existing" | "excel">("new");
+  const [exCustomer, setExCustomer] = useState<{ id: number; name: string } | null>(null);
+  const fromCustomer = (c: Partial<Requisites> & { name: string }) => ({ ...EMPTY_REQ, ...Object.fromEntries(Object.entries(c)
+    .filter(([k]) => k in EMPTY_REQ).map(([k, v]) => [k, k === "is_rented" ? !!v : v ?? ""])) } as Requisites);
   const fromContract = useCallback((c: ContractItem) => {
     setCt(c);
     if (c.customer) {
       setCustomer({ id: c.customer.id, name: c.customer.name, district_id: c.customer.district_id });
-      const { id: _i, code: _c, district_id: _d, ...req } = c.customer;
-      setForm({ requisites: { ...EMPTY_REQ, ...Object.fromEntries(Object.entries(req).map(([k, v]) => [k, v ?? ""])) } as Requisites,
-        type: c.type, price: c.price, annual_volume: c.annual_volume, annual_trips: c.annual_trips, valid_from: c.valid_from, valid_to: c.valid_to,
-        place: c.place ?? "", sign_method: c.sign_method ?? "electronic" });
+      const d = c.draft;
+      setForm({ requisites: fromCustomer(d?.requisites ?? c.customer), type: "by_volume", price: c.price,
+        annual_volume: d?.annual_volume ?? c.annual_volume, annual_trips: null, valid_from: d?.valid_from ?? c.valid_from,
+        valid_to: d?.valid_to ?? c.valid_to, place: d?.place ?? c.place ?? districtName(c.customer.district_id),
+        sign_method: d?.sign_method ?? c.sign_method ?? "electronic" });
     }
-    setStep(c.status === "returned" ? 1 : 2);
+    // Tugallanmagan (raqamsiz yoki tekshirilmagan o'zgarishlar) va qaytarilgan — forma; aks holda hujjat
+    setStep(c.status === "returned" || !c.number || c.draft ? 1 : 2);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { if (contractId) contractsApi.get(contractId).then(fromContract).catch(fail); }, [contractId, fromContract, fail]);
+  // Narx — davlat ta'rifi (tuman → viloyat), shartnoma boshlanish sanasidagi; qo'lda kiritilmaydi
+  useEffect(() => {
+    if (!customer || !form.valid_from) return;
+    tariffsApi.price(customer.district_id, form.valid_from).then((r) => setTariff(r.price)).catch(() => setTariff(null));
+  }, [customer, form.valid_from]);
 
   const pickCustomer = async (id: number) => {
+    if (mode === "existing") {
+      try { const c = await customersApi.get(id); setExCustomer({ id: c.id, name: c.name }); } catch (e) { fail(e); }
+      return;
+    }
     try {
       const c = await customersApi.get(id);
+      const draft = await contractsApi.start(c.id);  // «Tugallanmagan shartnomalar»da darhol paydo bo'ladi
+      changed();
+      setCt(draft);
       setCustomer({ id: c.id, name: c.name, district_id: c.district_id });
-      setForm((f) => ({ ...f, place: f.place || districtName(c.district_id), requisites: { ...EMPTY_REQ, name: c.name, stir: c.stir ?? "",
-        director: c.director ?? "", phone: c.phone ?? "", address: c.address ?? "", legal_address: c.legal_address ?? "", bank: c.bank ?? "",
-        mfo: c.mfo ?? "", account: c.account ?? "", oked: c.oked ?? "", cadastre: c.cadastre ?? "" } }));
+      setForm((f) => ({ ...f, place: f.place || districtName(c.district_id), requisites: fromCustomer(c as unknown as Requisites) }));
       setChecked(null);
       setStep(1);
     } catch (e) { fail(e); }
   };
 
-  const payload = (): ContractDraft => ({ ...form, customer_id: customer!.id, requisites: Object.fromEntries(Object.entries(form.requisites)
+  const payload = (): ContractDraft => ({ ...form, type: "by_volume", customer_id: customer!.id, requisites: Object.fromEntries(Object.entries(form.requisites)
     .map(([k, v]) => [k, typeof v === "string" ? v.trim() || null : v])) as unknown as Requisites });
+  /** Yopish yoki «Saqlab chiqish»: forma tekshiruvsiz loyihaga yoziladi (keyin «Davom etish»). */
+  const close = async () => {
+    if (step === 1 && ct && (ct.status === "draft" || ct.status === "returned") && !busy) {
+      try { await contractsApi.saveDraft(ct.id, payload()); changed(); toast(t("ctr_draft_saved")); } catch { /* jim */ }
+    }
+    onClose();
+  };
   const runCheck = async () => {
     setBusy(true);
     try {
@@ -95,11 +124,11 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     try {
       const c = ct ? await contractsApi.update(ct.id, payload()) : await contractsApi.create(payload());
       setCt(c); setStep(2); changed();
-      toast(t("ctr_saved", { n: c.number }), "success");
+      toast(t("ctr_saved", { n: c.number ?? "" }), "success");
     } catch (e) { fail(e); } finally { setBusy(false); }
   };
   const errOf = (f: string) => checked?.errors.find((e) => e.field === f);
-  const setReq = (k: keyof Requisites, v: string) => { setForm({ ...form, requisites: { ...form.requisites, [k]: v } }); setChecked(null); };
+  const setReq = (k: ReqText, v: string) => { setForm({ ...form, requisites: { ...form.requisites, [k]: v } }); setChecked(null); };
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => { setForm({ ...form, [k]: v }); setChecked(null); };
   const helper = (f: string, hint?: string) => {
     const e = errOf(f);
@@ -108,40 +137,53 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
 
   const steps = [t("ctr_step_customer"), t("ctr_step_data"), t("ctr_step_doc")];
   return (
-    <Dialog open onClose={() => !busy && onClose()} fullWidth maxWidth="lg" fullScreen={mobile} id="contract-wizard">
+    <Dialog open onClose={() => !busy && close()} fullWidth maxWidth="lg" fullScreen={mobile} id="contract-wizard">
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, pr: 6 }}>
-        {ct ? t("ctr_title_n", { n: ct.display_number }) : t("new_contract")}
+        {ct?.number ? t("ctr_title_n", { n: ct.display_number }) : t("new_contract")}
         {ct && <StatusChip status={ct.status} />}
-        <IconButton onClick={onClose} sx={{ position: "absolute", right: 8, top: 8 }} aria-label={t("close")}><CloseIcon /></IconButton>
+        <IconButton onClick={close} sx={{ position: "absolute", right: 8, top: 8 }} aria-label={t("close")}><CloseIcon /></IconButton>
       </DialogTitle>
       <DialogContent dividers>
         {step >= 0 && <Stepper activeStep={step} alternativeLabel sx={{ mb: 2.5 }}>{steps.map((s) => <Step key={s}><StepLabel>{s}</StepLabel></Step>)}</Stepper>}
         {ct?.status === "returned" && ct.return_comment && <Alert severity="error" sx={{ mb: 2 }} id="ctr-returned">
           <b>{t("ctr_returned_by")}</b> {ct.return_comment}</Alert>}
-        {step === 0 && <CustomerStep districts={districts} onPick={pickCustomer} fail={fail} />}
+        {step === 0 && <Stack spacing={2}>
+          <ToggleButtonGroup exclusive fullWidth value={mode} onChange={(_, v) => { if (v) { setMode(v); setExCustomer(null); } }} id="ctr-mode"
+            sx={{ flexWrap: { xs: "wrap", sm: "nowrap" } }}>
+            <ToggleButton value="new" data-mode="new">{t("ctr_mode_new")}</ToggleButton>
+            <ToggleButton value="existing" data-mode="existing">{t("ctr_mode_existing")}</ToggleButton>
+            <ToggleButton value="excel" data-mode="excel">{t("ctr_mode_excel")}</ToggleButton>
+          </ToggleButtonGroup>
+          {mode === "excel" ? <ExistingImport fail={fail} onDone={() => { changed(); }} />
+            : mode === "existing" && exCustomer ? <ExistingContractForm customer={exCustomer} fail={fail} onDone={() => { changed(); onClose(); }} />
+            : <CustomerStep districts={districts} onPick={pickCustomer} fail={fail} />}
+        </Stack>}
         {step === 1 && customer && <Stack spacing={2}>
           <Typography variant="subtitle2" color="text.secondary">{t("ctr_requisites")} · {districtName(customer.district_id)}</Typography>
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" } }}>
-            {REQ_FIELDS.map((f) => <TextField key={f.k} size="small" name={f.k} label={t(`ctr_f_${f.k}` as MessageKey)} value={form.requisites[f.k] ?? ""}
-              onChange={(e) => setReq(f.k, e.target.value)} error={!!errOf(f.k)} helperText={helper(f.k, f.hint)}
+            {REQ_FIELDS.map((f) => f.k === "cadastre"
+              ? <Stack key={f.k} direction="row" spacing={1} alignItems="flex-start">
+                <TextField size="small" name="cadastre" label={`${t("ctr_f_cadastre")} (${t("ctr_optional_short")})`} value={form.requisites.cadastre ?? ""}
+                  onChange={(e) => setReq("cadastre", e.target.value)} sx={{ flex: 1 }} />
+                <FormControlLabel sx={{ mr: 0, whiteSpace: "nowrap" }} label={t("ctr_rented")} control={<Checkbox size="small" name="is_rented"
+                  checked={!!form.requisites.is_rented} onChange={(e) => { setForm({ ...form, requisites: { ...form.requisites, is_rented: e.target.checked } }); setChecked(null); }} />} />
+              </Stack>
+              : <TextField key={f.k} size="small" name={f.k} label={t(`ctr_f_${f.k}` as MessageKey)} value={form.requisites[f.k] ?? ""}
+              onChange={(e) => setReq(f.k, f.digits ? onlyDigits(e.target.value, f.digits) : e.target.value)} error={!!errOf(f.k)}
+              helperText={helper(f.k, f.digits && f.k !== "oked" ? String(f.digits) : undefined)}
+              inputProps={f.digits ? { inputMode: "numeric", maxLength: f.digits } : undefined}
               sx={{ gridColumn: { md: `span ${f.span}` } }} />)}
           </Box>
           <Divider />
           <Typography variant="subtitle2" color="text.secondary">{t("ctr_terms")}</Typography>
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "repeat(4, 1fr)" } }}>
-            <TextField select size="small" name="type" label={t("contract_type")} value={form.type} onChange={(e) => set("type", e.target.value as ContractType)}>
-              {TYPES.map((x) => <MenuItem key={x} value={x}>{t(`ct_${x}` as MessageKey)}</MenuItem>)}
-            </TextField>
-            <TextField size="small" name="price" type="number" label={t(form.type === "monthly" ? "ctr_price_month" : form.type === "per_trip" ? "ctr_price_trip" : "ctr_price_m3")}
-              value={form.price ?? ""} onChange={(e) => set("price", e.target.value === "" ? null : Number(e.target.value))}
-              error={!!errOf("price")} helperText={helper("price") ?? t("ctr_vat_incl")} />
-            {form.type === "per_trip"
-              ? <TextField size="small" name="annual_trips" type="number" label={t("ctr_annual_trips")} value={form.annual_trips ?? ""}
-                  onChange={(e) => set("annual_trips", e.target.value === "" ? null : Number(e.target.value))} error={!!errOf("annual_trips")} helperText={helper("annual_trips")} />
-              : null}
+            <TextField size="small" label={t("contract_type")} value={t("ct_by_volume")} InputProps={{ readOnly: true }} />
+            <TextField size="small" name="price" label={t("ctr_price_tariff")} InputProps={{ readOnly: true }} id="ctr-tariff"
+              value={tariff ? fmtMoney(tariff) : tariff === null ? t("ctr_no_tariff") : "…"}
+              error={tariff === null || !!errOf("price")} helperText={errOf("price") ? helper("price") : t("ctr_tariff_hint")} />
             <TextField size="small" name="annual_volume" type="number" label={t("ctr_annual_volume")} value={form.annual_volume ?? ""}
               onChange={(e) => set("annual_volume", e.target.value === "" ? null : Number(e.target.value))}
-              error={!!errOf("annual_volume")} helperText={helper("annual_volume") ?? (form.type === "by_volume" ? undefined : t("ctr_optional"))} />
+              error={!!errOf("annual_volume")} helperText={helper("annual_volume")} />
             <TextField size="small" name="place" label={t("ctr_place")} value={form.place} onChange={(e) => set("place", e.target.value)}
               error={!!errOf("place")} helperText={helper("place")} />
             <TextField size="small" name="valid_from" type="date" label={t("valid_from")} value={form.valid_from} InputLabelProps={{ shrink: true }}
@@ -175,7 +217,8 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
         {step === -1 && <Typography color="text.secondary">…</Typography>}
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 1.5, flexWrap: "wrap", gap: 1 }}>
-        {step === 1 && !ct && <Button onClick={() => setStep(0)} disabled={busy}>{t("back")}</Button>}
+        {step === 1 && ct && (ct.status === "draft" || ct.status === "returned") &&
+          <Button id="ctr-save-exit" onClick={close} disabled={busy}>{t("ctr_save_exit")}</Button>}
         {step === 2 && ct && (ct.status === "draft" || ct.status === "returned") &&
           <Button onClick={() => { setStep(1); setChecked(null); }} disabled={busy} id="ctr-edit">{t("ctr_edit")}</Button>}
         <Box sx={{ flex: 1 }} />

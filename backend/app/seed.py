@@ -13,7 +13,7 @@ from app.core.permissions import apply_template
 from app.core.security import hash_password
 from app.db.session import SessionLocal
 from app.services.schedule import today as schedule_today
-from app.models import AppSetting, Contract, ContractEvent, Customer, District, Provider, Region, OrderForm, Payment, Request, RequestEvent, User, VehiclePosition, WorkSchedule, UserDistrict, Vehicle
+from app.models import AppSetting, Contract, ContractEvent, Tariff, Customer, District, Provider, Region, OrderForm, Payment, Request, RequestEvent, User, VehiclePosition, WorkSchedule, UserDistrict, Vehicle
 from app.db.base import utcnow
 from app.models.enums import ContractType, LocationStatus, RequestStatus, Role, WasteType
 
@@ -52,6 +52,9 @@ async def seed() -> None:
             region = Region(name=region_name)
             db.add(region)
             await db.flush()
+            # DEMO ta'riflar (1 m³, QQS bilan): viloyat bo'yicha, yil boshidan
+            db.add(Tariff(region_id=region.id, price={"BTE": 84000, "BTK": 179312}.get(code, 150000),
+                          valid_from=date(date.today().year, 1, 1), note="Demo ta'rif"))
             # DEMO rekvizitlar (haqiqiy emas) — admin «Sozlamalar»da almashtiriladi
             k = len(district_ids) + 1
             db.add(Provider(name=prov_name, code=code, region_id=region.id, full_name=f'"{prov_name}" MChJ (demo)',
@@ -63,6 +66,9 @@ async def seed() -> None:
                 d = District(name=d_name, region_id=region.id)
                 db.add(d)
                 await db.flush()
+                if d_name == "Andijon shahri":  # demo: shahar uchun alohida ta'rif
+                    db.add(Tariff(region_id=region.id, district_id=d.id, price=90000, valid_from=date(date.today().year, 1, 1),
+                                  note="Demo: shahar ta'rifi"))
                 district_ids.append(d.id)
                 gps = User(username=f"gps{n}", password_hash=pwd, full_name=f"GPS xodimi — {d_name}", role=Role.gps, district_id=d.id)
                 apply_template(gps)
@@ -130,7 +136,8 @@ async def seed() -> None:
                     if r.finished_at:
                         db.add(RequestEvent(request_id=r.id, status=RequestStatus.done, created_at=r.finished_at))
                         # Yopilgan buyurtma varaqasi (kub bilan) — "Korxonalar" jadvali va hisob uchun
-                        f = OrderForm(request_id=r.id, print_count=1, printed_at=created, volume_m3=3 + ((days + n * 3) % 9),
+                        f = OrderForm(request_id=r.id, print_count=1, printed_at=created, print_confirmed_at=created, print_confirm_via="manual",
+                                      volume_m3=3 + ((days + n * 3) % 9),
                                       waste_kind="solid", closed_at=r.finished_at, closed_via="form")
                         db.add(f)
                         await db.flush()
