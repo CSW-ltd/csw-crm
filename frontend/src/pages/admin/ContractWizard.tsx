@@ -384,6 +384,39 @@ function CustomerStep({ districts, onPick, fail }: { districts: District[]; onPi
   );
 }
 
+const DELETE_MIN = 5;
+/** Tugallanmagan shartnomani o'chirish: izoh majburiy (kamida 5 belgi) — Vaziyat paneliga matni bilan tushadi. */
+export function DeleteContractDialog({ ct, onClose, onDeleted }: { ct: ContractItem; onClose: () => void; onDeleted: () => void }) {
+  const { t, tErr } = useI18n();
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const ok = reason.trim().length >= DELETE_MIN;
+  const go = async () => {
+    if (!ok) return;
+    setBusy(true);
+    try { await contractsApi.remove(ct.id, reason.trim()); changed(); toast(t("ctr_deleted"), "success"); onDeleted(); }
+    catch (e) { toast(tErr(errorCode(e), errorMessage(e)), "error"); } finally { setBusy(false); }
+  };
+  return (
+    <Dialog open onClose={() => !busy && onClose()} fullWidth maxWidth="sm" id="ctr-delete-dialog">
+      <DialogTitle sx={{ color: "error.main", fontWeight: 700 }}>{t("ctr_delete_title")}</DialogTitle>
+      <DialogContent dividers>
+        <Stack spacing={2}>
+          <Typography>{t("ctr_delete_what", { n: ct.display_number || t("ctr_no_number"), c: ct.customer?.name ?? "" })}</Typography>
+          <Alert severity="warning" variant="outlined">{t("ctr_delete_hint")}</Alert>
+          <TextField id="ctr-delete-reason" autoFocus multiline minRows={2} required label={t("ctr_delete_reason")} value={reason}
+            onChange={(e) => setReason(e.target.value)} inputProps={{ maxLength: 500 }} error={reason.length > 0 && !ok}
+            helperText={ok ? t("ctr_delete_reason_hint") : t("ctr_delete_reason_min", { n: DELETE_MIN })} />
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} disabled={busy}>{t("cancel")}</Button>
+        <Button id="ctr-delete-confirm" color="error" variant="contained" disableElevation disabled={!ok || busy} onClick={go}>{t("ctr_delete_do")}</Button>
+      </DialogActions>
+    </Dialog>
+  );
+}
+
 function DocStep({ ct, busy, setBusy, fail, onSigned, onDeleted }: { ct: ContractItem; busy: boolean; setBusy: (b: boolean) => void;
   fail: (e: unknown) => void; onSigned: (c: ContractItem) => void; onDeleted: () => void }) {
   const { t } = useI18n();
@@ -406,11 +439,8 @@ function DocStep({ ct, busy, setBusy, fail, onSigned, onDeleted }: { ct: Contrac
         platform: electronic ? sign.platform : undefined, platform_id: electronic ? sign.platform_id.trim() : undefined, file }));
     } catch (e) { fail(e); } finally { setBusy(false); }
   };
-  const remove = async () => {
-    if (!window.confirm(t("ctr_delete_confirm"))) return;
-    setBusy(true);
-    try { await contractsApi.remove(ct.id); onDeleted(); } catch (e) { fail(e); } finally { setBusy(false); }
-  };
+  const [askDelete, setAskDelete] = useState(false);
+  const remove = () => setAskDelete(true);
   const name = `shartnoma_${ct.display_number.replace(/[^\w-]+/g, "_")}`;
   return (
     <Box sx={{ display: "grid", gap: 2, gridTemplateColumns: { xs: "1fr", md: "3fr 2fr" } }}>
@@ -460,6 +490,7 @@ function DocStep({ ct, busy, setBusy, fail, onSigned, onDeleted }: { ct: Contrac
           </Stack>
         </Paper>}
         {ct.status === "draft" && <Button color="error" onClick={remove} disabled={busy} id="ctr-delete">{t("ctr_delete")}</Button>}
+        {askDelete && <DeleteContractDialog ct={ct} onClose={() => setAskDelete(false)} onDeleted={() => { setAskDelete(false); onDeleted(); }} />}
       </Stack>
     </Box>
   );

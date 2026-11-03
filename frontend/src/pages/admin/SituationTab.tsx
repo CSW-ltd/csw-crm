@@ -30,7 +30,7 @@ export const SITUATION_KINDS = ["account_locked", "act_suspect", "request_failed
   "user_deactivated", "user_activated", "password_reset", "district_deactivated", "district_activated", "vehicle_deactivated",
   "vehicle_activated", "settings_changed", "staff_pending", "staff_approved", "staff_rejected", "staff_updated", "access_changed",
   "vehicle_created", "vehicle_updated", "customer_created", "customer_updated", "district_radius_changed", "request_overdue", "order_locked", "order_reprint",
-  "request_reassigned"] as const;
+  "request_reassigned", "contract_deleted"] as const;
 
 const LEVEL_ICON = {
   info: <InfoIcon color="info" fontSize="small" />, activity: <HistoryIcon color="action" fontSize="small" />, warning: <WarningIcon color="warning" fontSize="small" />,

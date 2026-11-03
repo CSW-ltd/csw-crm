@@ -173,7 +173,7 @@ async def scoped_customers(db: AsyncSession, actor: User, only_contracted: bool 
     if customer_id is not None:
         q = q.where(Customer.id == customer_id)
     if only_contracted:
-        q = q.where(Customer.id.in_(select(Contract.customer_id).where(Contract.status != "draft")))
+        q = q.where(Customer.id.in_(select(Contract.customer_id).where(Contract.status.notin_(("draft", "deleted")))))
     return list((await db.execute(q.order_by(Customer.name))).scalars())
 
 
@@ -252,7 +252,8 @@ async def new_contracts(db: AsyncSession, actor: User, district_id: int | None =
     districts = list((await db.execute(dq)).scalars())
     ids = [d.id for d in districts] or [-1]
     rows = (await db.execute(select(Contract.signed_on, Contract.created_at, Customer.district_id)
-                             .join(Customer, Customer.id == Contract.customer_id).where(Customer.district_id.in_(ids)))).all()
+                             .join(Customer, Customer.id == Contract.customer_id)
+                             .where(Customer.district_id.in_(ids), Contract.status != "deleted"))).all()
     per = {d.id: {k: 0 for k, _ in NEW_CONTRACT_PERIODS} for d in districts}
     for signed, created, did in rows:
         day = signed or local_day(created)

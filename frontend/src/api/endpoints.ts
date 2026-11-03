@@ -241,7 +241,7 @@ export const contractsApi = {
     return api.post<ContractItem>(`/contracts/${id}/scan-upload`, fd, { timeout: 60_000 }).then((r) => r.data);
   },
   update: (id: number, body: ContractDraft) => api.put<ContractItem>(`/contracts/${id}`, body).then((r) => r.data),
-  remove: (id: number) => api.delete(`/contracts/${id}`),
+  remove: (id: number, reason: string) => api.post(`/contracts/${id}/delete`, { reason }),
   get: (id: number) => api.get<ContractItem>(`/contracts/${id}`).then((r) => r.data),
   list: (params: { status?: string; q?: string; district_id?: number; limit?: number }) =>
     api.get<{ items: ContractItem[]; total: number }>("/contracts", { params }).then((r) => r.data),
