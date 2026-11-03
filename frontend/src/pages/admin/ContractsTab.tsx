@@ -20,7 +20,8 @@ import { formatDateTime } from "@/lib/format";
 import type { ContractItem, ContractStatus } from "@/types";
 import type { RefData } from "./AdminHome";
 import { fmtMoney } from "./CompaniesTab";
-import { CONTRACTS_CHANGED, ContractWizard, saveBlob, StatusChip } from "./ContractWizard";
+import { CONTRACTS_CHANGED, ContractWizard, DeleteContractDialog, saveBlob, StatusChip } from "./ContractWizard";
+import DeleteIcon from "@mui/icons-material/DeleteOutline";
 import { usePersisted } from "@/hooks/usePersisted";
 
 const FILTERS: ("all" | ContractStatus)[] = ["all", "draft", "signed", "returned", "approved"];
@@ -215,6 +216,7 @@ function ContractView({ id, isLegal, isAcc, districts, startReturn, onClose, onC
   const [c, setC] = useState<ContractItem | null>(null);
   const [ret, setRet] = useState<string | null>(startReturn ? "" : null);
   const pdfRef = useRef<HTMLInputElement>(null);
+  const [askDelete, setAskDelete] = useState(false);
   const [busy, setBusy] = useState(false);
   const fail = useCallback((e: unknown) => toast(tErr(errorCode(e), errorMessage(e)), "error"), [tErr]);
   useEffect(() => { contractsApi.get(id).then(setC).catch(fail); }, [id, fail]);
@@ -263,6 +265,9 @@ function ContractView({ id, isLegal, isAcc, districts, startReturn, onClose, onC
         </Stack>
       </DialogContent>
       <DialogActions sx={{ flexWrap: "wrap", gap: 1 }}>
+        {isLegal && c.status === "draft" && <Button id="ctr-view-delete" color="error" startIcon={<DeleteIcon />} disabled={busy}
+          onClick={() => setAskDelete(true)}>{t("ctr_delete")}</Button>}
+        {askDelete && <DeleteContractDialog ct={c} onClose={() => setAskDelete(false)} onDeleted={() => { setAskDelete(false); onChanged(); onClose(); }} />}
         {isLegal && needPdf && <>
           <input ref={pdfRef} type="file" hidden accept="application/pdf,.pdf" id="ctr-pdf-file" onChange={(e) => {
             const f = e.target.files?.[0]; e.target.value = "";

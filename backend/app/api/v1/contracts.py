@@ -104,9 +104,14 @@ async def update(contract_id: int, body: svc.ContractDraftIn, user: User = Legal
     return svc.out(await svc.update(db, user, contract_id, body), with_events=True)
 
 
-@router.delete("/{contract_id}", status_code=204)
-async def delete(contract_id: int, user: User = Legal, db: AsyncSession = DB) -> Response:
-    await svc.delete_draft(db, user, contract_id)
+class DeleteIn(BaseModel):
+    reason: str = Field("", max_length=500)
+
+
+@router.post("/{contract_id}/delete", status_code=204)
+async def delete(contract_id: int, body: DeleteIn, user: User = Legal, db: AsyncSession = DB) -> Response:
+    """Tugallanmagan shartnomani izoh bilan o'chirish (arxivga)."""
+    await svc.delete_draft(db, user, contract_id, body.reason)
     return Response(status_code=204)
 
 

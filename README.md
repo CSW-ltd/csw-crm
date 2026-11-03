@@ -315,3 +315,13 @@ Batafsil kelishuvlar: `docs/plans/three-stage-flow.md`.
 - **Rejimlar:** Yangi — yashil, Mavjud — ko'k, Excel — to'q sariq: dialog chetidagi chiziq, sarlavha, banner, asosiy tugma. Rejim
   almashtirilganda forma tozalanadi.
 - Hisob-kitob o'zgarmagan: kub bo'yicha faktura varaqa yopilgan kundagi ta'rif bo'yicha (shartnoma bandiga ko'ra).
+
+## Tugallanmagan shartnomani izoh bilan o'chirish (PR #22)
+
+- «Tugallanmagan» shartnoma (loyiha, skan kutayotgan qog'oz, PDF kutayotgan mavjud) ko'rinishida va usta hujjat bosqichida «O'chirish».
+  Sabab majburiy (kamida 5 belgi) — frontend tugmani o'chiradi, backend `reason_required` qaytaradi. Imzolangan/qaytarilgan/tasdiqlangan — 409.
+- API: `POST /api/v1/contracts/{id}/delete` `{"reason": "..."}` (eski `DELETE /contracts/{id}` olib tashlandi).
+- Arxiv: `status = "deleted"`, `deleted_at`, `delete_reason`, `archived_number` (migratsiya 0019). Ro'yxat, sanoq, hisob-kitob va statistikaga
+  kirmaydi. Raqam va platforma ID bo'shatiladi (xato kiritilgan mavjud shartnomani o'sha raqam bilan qayta kiritish uchun); avtomatik
+  raqamlar (BTE-2026/…) arxivdagilarni ham hisobga oladi — qayta berilmaydi.
+- Vaziyat: `contract_deleted` ogohlantirish (qo'ng'iroqcha) — admin va tuman manageri; matnda raqam, korxona, tuman va sabab. PDF eksportda alohida tur.

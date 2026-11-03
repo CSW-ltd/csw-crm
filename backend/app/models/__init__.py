@@ -251,6 +251,10 @@ class Contract(TimestampMixin, Base):
     # Mavjud shartnoma: legal narxni qo'lda kiritgan bo'lsa — o'sha sanadagi ta'rif (solishtirish uchun) va farq sababi
     tariff_price: Mapped[float | None] = mapped_column(Numeric(14, 2))
     price_reason: Mapped[str | None] = mapped_column(String(255))
+    # O'chirilgan (arxiv) tugallanmagan shartnoma: raqam/platforma ID bo'shatiladi (qayta kiritish uchun), eskisi shu yerda saqlanadi
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime)
+    delete_reason: Mapped[str | None] = mapped_column(String(500))
+    archived_number: Mapped[str | None] = mapped_column(String(90))
     customer: Mapped["Customer"] = relationship(viewonly=True)
     events: Mapped[list["ContractEvent"]] = relationship(order_by="ContractEvent.id", cascade="all, delete-orphan")
 

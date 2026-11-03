@@ -264,3 +264,38 @@ async def test_existing_manual_price_reason_and_permission(world, client_factory
         await s_.commit()
     r = (await legal.post("/api/v1/contracts/check", json={**base, "existing": {**meta, "number": "OLD-76"}, "price": 1})).json()
     assert r["totals"]["price"] == 84000 and not any(e["field"].startswith("price") for e in r["errors"]), r
+
+
+async def test_delete_unfinished_with_reason_archives_and_warns(world, client_factory, sessionmaker):
+    """PR #22: tugallanmagan shartnoma izoh bilan o'chiriladi (arxiv), raqam bo'shaydi, Vaziyatga ogohlantirish."""
+    from app.models import Contract, Tariff
+    async with sessionmaker() as s_:
+        for rid in await _region_ids(sessionmaker, world):
+            s_.add(Tariff(region_id=rid, price=84000, valid_from=date(T.year - 1, 1, 1)))
+        await s_.commit()
+    legal, admin, mgr = await client_factory("legal"), await client_factory("admin"), await client_factory("manager")
+    cid = (await legal.post("/api/v1/customers", json={"name": "Xato Kiritilgan MChJ", "district_id": world["districts"]["a"]})).json()["id"]
+    ex = body(cid, price=84000, valid_from="2026-02-01", valid_to="2026-12-31", sign_method="paper",
+              existing={"number": "XATO-1", "signed_on": "2026-02-01"})
+    c = (await legal.post("/api/v1/contracts/existing", json=ex)).json()
+    assert c["awaiting_scan"]
+    before = (await mgr.get("/api/v1/situation/unread")).json()["unread"]
+    assert (await legal.post(f"/api/v1/contracts/{c['id']}/delete", json={})).json()["error"]["code"] == "reason_required"
+    assert (await legal.post(f"/api/v1/contracts/{c['id']}/delete", json={"reason": "Xato korxonaga kiritilgan"})).status_code == 204
+    async with sessionmaker() as s_:
+        row = await s_.get(Contract, c["id"])
+        assert row.status == "deleted" and row.number is None and row.archived_number == "XATO-1" and row.delete_reason.startswith("Xato")
+    # Ro'yxat va «Tugallanmagan» sanog'ida yo'q; raqam qayta ishlatiladi
+    assert not any(x["id"] == c["id"] for x in (await legal.get("/api/v1/contracts", params={"status": "draft"})).json()["items"])
+    assert (await legal.post("/api/v1/contracts/existing", json=ex)).status_code == 201
+    # Vaziyat: ogohlantirish — manager (o'z tumani) qo'ng'iroqchasida, matni bilan
+    ev = (await mgr.get("/api/v1/situation", params={"kind": "contract_deleted"})).json()
+    items = ev["items"] if isinstance(ev, dict) else ev
+    assert items and items[0]["level"] == "warning" and "XATO-1" in items[0]["message"] and "Xato korxonaga kiritilgan" in items[0]["message"]
+    assert "Asaka tumani" in items[0]["message"] or "tumani" in items[0]["message"]
+    assert (await mgr.get("/api/v1/situation/unread")).json()["unread"] == before + 1
+    assert any(x["kind"] == "contract_deleted" for x in ((await admin.get("/api/v1/situation")).json().get("items", [])))
+    # Imzolangan shartnomani o'chirib bo'lmaydi
+    c2 = (await legal.get("/api/v1/contracts", params={"q": "XATO-1"})).json()["items"][0]
+    await legal.post(f"/api/v1/contracts/{c2['id']}/scan-upload", files={"file": ("a.pdf", b"%PDF-1", "application/pdf")})
+    assert (await legal.post(f"/api/v1/contracts/{c2['id']}/delete", json={"reason": "Sinov uchun o'chirish"})).status_code == 409

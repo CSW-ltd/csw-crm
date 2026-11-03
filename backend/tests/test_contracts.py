@@ -156,8 +156,16 @@ async def test_draft_delete_and_scope(world, client_factory):
     legal = await client_factory("legal")
     cid = await _new_customer(legal, world)
     ct = (await legal.post("/api/v1/contracts", json=body(cid))).json()
-    assert (await legal.delete(f"/api/v1/contracts/{ct['id']}")).status_code == 204
+    # PR #22: izohsiz o'chmaydi
+    r = await legal.post(f"/api/v1/contracts/{ct['id']}/delete", json={"reason": " "})
+    assert r.json()["error"]["code"] == "reason_required"
+    assert (await legal.get(f"/api/v1/contracts/{ct['id']}")).status_code == 200
+    assert (await legal.post(f"/api/v1/contracts/{ct['id']}/delete", json={"reason": "Korxona boshqa tumanga o'tdi"})).status_code == 204
     assert (await legal.get(f"/api/v1/contracts/{ct['id']}")).status_code == 404
+    assert not any(x["id"] == ct["id"] for x in (await legal.get("/api/v1/contracts")).json()["items"])
+    # Avtomatik raqam qayta berilmaydi
+    ct2 = (await legal.post("/api/v1/contracts", json=body(cid))).json()
+    assert ct2["number"] != ct["number"] and ct2["number"].endswith("00002"), ct2["number"]
     # Surxondaryo (BTK) — Didox shabloni
     r = await legal.post("/api/v1/customers", json={"name": "Termiz Test MChJ", "district_id": world["districts"]["b"]})
     ct = (await legal.post("/api/v1/contracts", json=body(r.json()["id"], requisites={**REQ, "stir": "309111333"}))).json()

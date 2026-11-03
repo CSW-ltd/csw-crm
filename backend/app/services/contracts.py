@@ -238,6 +238,9 @@ async def _provider(db: AsyncSession, district_id: int) -> Provider | None:
 async def next_number(db: AsyncSession, prefix_code: str, year: int) -> str:
     prefix = f"{prefix_code}-{year}/"
     rows = (await db.execute(select(Contract.number).where(Contract.number.like(f"{prefix}%")))).scalars().all()
+    # o'chirilgan (arxiv) loyihalarning raqamlari ham qayta berilmaydi
+    rows += [x.split(" / ")[0] for x in (await db.execute(select(Contract.archived_number)
+                                                           .where(Contract.archived_number.like(f"{prefix}%")))).scalars().all()]
     n = max([int(x[len(prefix):]) for x in rows if x[len(prefix):].isdigit()] or [0]) + 1
     return f"{prefix}{n:05d}"
 
@@ -339,7 +342,7 @@ async def _own(db: AsyncSession, actor: User, contract_id: int, lock: bool = Fal
     if lock:
         q = q.with_for_update()
     ct = (await db.execute(q)).scalar_one_or_none()
-    if not ct:
+    if not ct or ct.status == "deleted":
         raise not_found("contract")
     access.check_scope(actor, ct.customer.district_id)
     return ct
@@ -397,12 +400,34 @@ async def save_draft(db: AsyncSession, actor: User, contract_id: int, body: Cont
     return await get(db, actor, ct.id)
 
 
-async def delete_draft(db: AsyncSession, actor: User, contract_id: int) -> None:
+DELETE_REASON_MIN = 5
+
+
+async def delete_draft(db: AsyncSession, actor: User, contract_id: int, reason: str | None) -> None:
+    """Tugallanmagan shartnomani o'chirish — faqat izoh bilan. Yozuv arxivga («deleted»): ro'yxat, sanoq va hisobga kirmaydi;
+    raqam va platforma ID bo'shatiladi (xato kiritilgan mavjud shartnomani to'g'ri qayta kiritish uchun), eskisi archived_number'da.
+    Vaziyat paneliga ogohlantirish (admin va tuman manageri)."""
+    from app.models.enums import SituationLevel
+    from app.services import situation
+    reason = (reason or "").strip()
+    if len(reason) < DELETE_REASON_MIN:
+        raise invalid("reason_required", f"O'chirish sababini yozing (kamida {DELETE_REASON_MIN} belgi)")
     ct = await _own(db, actor, contract_id, lock=True)
     if ct.status != "draft":
-        raise conflict("contract_locked", "Faqat imzolanmagan loyihani o'chirish mumkin")
-    await db.delete(ct)
-    await db.commit()
+        raise conflict("contract_locked", "Faqat tugallanmagan shartnomani o'chirish mumkin")
+    cust = ct.customer
+    district = await db.get(District, cust.district_id)
+    label = ct.display_number or "raqamsiz loyiha"
+    ct.archived_number = " / ".join(x for x in (ct.number, ct.platform_id) if x) or None
+    ct.number = ct.platform_id = None
+    ct.status, ct.is_active, ct.deleted_at, ct.delete_reason = "deleted", False, utcnow(), reason
+    _event(ct, actor, "deleted", reason)
+    situation.add(db, SituationLevel.warning, "contract_deleted",
+                  f"Shartnoma o'chirildi: {label} «{cust.name}» ({district.name if district else '—'}) — {reason}",
+                  params={"contract": label, "customer": cust.name, "district": district.name if district else None, "comment": reason,
+                          "contract_id": ct.id},
+                  district_id=cust.district_id, actor_id=actor.id, ref=("customer", cust.id))
+    await situation.commit(db)
 
 
 async def sign(db: AsyncSession, storage: Storage, actor: User, contract_id: int, signed_on: date, method: str,
@@ -508,7 +533,9 @@ async def search(db: AsyncSession, actor: User, status: str | None = None, q: st
     if district_id:
         qry = qry.where(Customer.district_id == district_id)
     if status:
-        qry = qry.where(Contract.status.in_(status.split(",")))
+        qry = qry.where(Contract.status.in_([x for x in status.split(",") if x != "deleted"] or ["-"]))
+    else:
+        qry = qry.where(Contract.status != "deleted")
     if q and q.strip():
         t = f"%{q.strip().lower()}%"
         qry = qry.where(or_(func.lower(Customer.name).like(t), func.lower(Customer.code).like(t), Customer.stir.like(t),
