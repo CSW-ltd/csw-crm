@@ -300,3 +300,18 @@ Batafsil kelishuvlar: `docs/plans/three-stage-flow.md`.
   (yorug'/qorong'i), chapda holat rangidagi chiziq, katta yozuvlar, karta ustida: Tasdiqlash, Izoh bilan qaytarish, Hujjat, Skan.
 - **Huquqlar jadvali:** xom kalitlar (`m_orders` va h.k.) o'rniga tushunarli nomlar va izohlar; «Murojaatlar» ikki xil nom oldi —
   «Chiqish murojaatlari» va «Yangi korxona murojaatlari».
+
+## Mavjud shartnoma narxi, xatolar alerti, rejim ranglari (PR #21)
+
+- **Mavjud shartnomada narx:** kub turida «Narx (QQS bilan)» bo'sh turadi — legal shartnomadagi (eski) narxni kiritadi.
+  Narx shartnoma boshlangan sanadagi ta'rif bilan solishtiriladi; farq qilsa yoki o'sha sanaga ta'rif yo'q bo'lsa —
+  «Narx sababi» majburiy. Saqlanadi: `contracts.tariff_price`, `contracts.price_reason`. Buxgalter kartasida «Ta'rifdan farqli»,
+  faoliyat jurnalida izoh. Qaytarilgan mavjud shartnoma tuzatilganda qo'lda narx saqlanadi.
+- **Huquq** `customers.existing_price` («Mavjud shartnoma narxini kiritish»): legalda standart, admin o'chiradi; o'chirilsa narx
+  ta'rifdan olinadi. Migratsiya 0018 mavjud legal'larga beradi.
+- **Excel:** «Narx, QQS bilan (shartnomadagi)» va «Narx sababi» ustunlari; xatolar `price_required`, `price_reason_required`, `no_tariff`.
+  Eski (PR #20) shablon ham o'qiladi.
+- **Tekshiruv xatolari:** forma tepasida qizil alert — har xato alohida qatorda, nomini bossa maydonga o'tadi; toast'da birinchi 3 tasi.
+- **Rejimlar:** Yangi — yashil, Mavjud — ko'k, Excel — to'q sariq: dialog chetidagi chiziq, sarlavha, banner, asosiy tugma. Rejim
+  almashtirilganda forma tozalanadi.
+- Hisob-kitob o'zgarmagan: kub bo'yicha faktura varaqa yopilgan kundagi ta'rif bo'yicha (shartnoma bandiga ko'ra).

@@ -11,6 +11,8 @@ import { contractsApi, customersApi, tariffsApi } from "@/api/endpoints";
 import { onlyDigits } from "@/components/DigitsField";
 import { errorCode, errorMessage } from "@/api/client";
 import { STAGE } from "@/components/Stage";
+import { useCan } from "@/hooks/useCan";
+import { MESSAGES } from "@/i18n/messages";
 import { useI18n } from "@/i18n/I18nContext";
 import type { MessageKey } from "@/i18n/messages";
 import { toast } from "@/lib/alerts";
@@ -44,6 +46,17 @@ export function saveBlob(blob: Blob, name: string) {
 
 interface Props { districts: District[]; contractId?: number; onClose: () => void; onDone?: (c: ContractItem) => void }
 
+type Mode = "new" | "existing" | "excel";
+/** Uch rejim bir-biridan rang, sarlavha va banner bilan ajraladi. */
+export const MODE_COLOR: Record<Mode, string> = { new: STAGE.green.bg, existing: "#1E6FD9", excel: "#E07B00" };
+const MODE_HOVER: Record<Mode, string> = { new: STAGE.green.border, existing: "#1757AD", excel: "#B86400" };
+const EMPTY_EX = { number: "", signed_on: "", platform: "didox", platform_id: "" };
+/** Xato maydoni → yorliq kaliti va formadagi input nomi. */
+const ERR_LABEL: Record<string, MessageKey> = { price: "ctr_price", price_reason: "ctr_price_reason", annual_volume: "ctr_annual_volume",
+  annual_trips: "ctr_annual_trips" as MessageKey, place: "ctr_place", valid_from: "valid_from", valid_to: "valid_to", number: "contract_no",
+  signed_on: "signed_on", platform_id: "ctr_platform_id", type: "contract_type" };
+const ERR_INPUT: Record<string, string> = { number: "ex_number", signed_on: "ex_signed", platform_id: "ex_pid" };
+
 /** «Yangi shartnoma»: 1) korxona 2) rekvizitlar va shartlar → «Tekshirish» → raqam 3) hujjat (PDF/Word) → «Imzolandi — buxgalteriyaga yuborish». */
 export function ContractWizard({ districts, contractId, onClose, onDone }: Props) {
   const { t, tErr } = useI18n();
@@ -52,8 +65,11 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   const [step, setStep] = useState(contractId ? -1 : 0);
   const [ct, setCt] = useState<ContractItem | null>(null);
   const [customer, setCustomer] = useState<{ id: number; name: string; district_id: number } | null>(null);
-  const [form, setForm] = useState<Omit<ContractDraft, "customer_id">>({ requisites: EMPTY_REQ, type: "by_volume", price: null, annual_volume: null,
-    annual_trips: null, valid_from: todayIso(), valid_to: yearEnd(), place: "", sign_method: "electronic" });
+  const emptyForm = (): Omit<ContractDraft, "customer_id"> => ({ requisites: EMPTY_REQ, type: "by_volume", price: null, annual_volume: null,
+    annual_trips: null, valid_from: todayIso(), valid_to: yearEnd(), place: "", sign_method: "electronic", price_reason: "" });
+  const [form, setForm] = useState<Omit<ContractDraft, "customer_id">>(emptyForm);
+  const can = useCan();
+  const errBox = useRef<HTMLDivElement>(null);
   const [checked, setChecked] = useState<ContractCheck | null>(null);
   const [busy, setBusy] = useState(false);
   const fail = useCallback((e: unknown) => toast(tErr(errorCode(e), errorMessage(e)), "error"), [tErr]);
@@ -61,12 +77,19 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
 
   const [tariff, setTariff] = useState<number | null | undefined>(undefined);
   // Boshlang'ich tanlov: yangi shartnoma tuzish yoki mavjud (imzolangan) shartnomani kiritish (bittalab / Excel)
-  const [mode, setMode] = useState<"new" | "existing" | "excel">("new");
+  const [mode, setMode] = useState<Mode>("new");
   // Mavjud shartnoma: yangi bilan bir xil forma + raqam, imzolangan sana, platforma ID, skan → buxgalter tasdig'iga
-  const [ex, setEx] = useState({ number: "", signed_on: "", platform: "didox", platform_id: "" });
+  const [ex, setEx] = useState(EMPTY_EX);
   const [exFile, setExFile] = useState<File | null>(null);
   const exFileRef = useRef<HTMLInputElement>(null);
   const isEx = mode === "existing";
+  // Qo'lda/Excel kiritilgan shartnoma (yangi yoki qaytarilgani tuzatilmoqda) — narxni legal kiritadi (ruxsat bilan), sabab majburiy
+  const manualSrc = isEx || ct?.source === "manual" || ct?.source === "import";
+  const vmode: Mode = ct ? (manualSrc ? "existing" : "new") : mode;
+  const canPrice = can("customers.existing_price");
+  const switchMode = (m: Mode) => {  // rejim almashganda forma tozalanadi
+    setMode(m); setCustomer(null); setForm(emptyForm()); setEx(EMPTY_EX); setExFile(null); setChecked(null); setTariff(undefined);
+  };
   const fromCustomer = (c: Partial<Requisites> & { name: string }) => ({ ...EMPTY_REQ, ...Object.fromEntries(Object.entries(c)
     .filter(([k]) => k in EMPTY_REQ).map(([k, v]) => [k, k === "is_rented" ? !!v : v ?? ""])) } as Requisites);
   const fromContract = useCallback((c: ContractItem) => {
@@ -74,7 +97,8 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     if (c.customer) {
       setCustomer({ id: c.customer.id, name: c.customer.name, district_id: c.customer.district_id });
       const d = c.draft;
-      setForm({ requisites: fromCustomer(d?.requisites ?? c.customer), type: "by_volume", price: c.price,
+      const manual = c.source === "manual" || c.source === "import";
+      setForm({ requisites: fromCustomer(d?.requisites ?? c.customer), type: manual ? c.type : "by_volume", price: c.price, price_reason: c.price_reason ?? "",
         annual_volume: d?.annual_volume ?? c.annual_volume, annual_trips: null, valid_from: d?.valid_from ?? c.valid_from,
         valid_to: d?.valid_to ?? c.valid_to, place: d?.place ?? c.place ?? districtName(c.customer.district_id),
         sign_method: d?.sign_method ?? c.sign_method ?? "electronic" });
@@ -113,7 +137,8 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     } catch (e) { fail(e); }
   };
 
-  const payload = (): ContractDraft => ({ ...form, type: isEx ? form.type : "by_volume", customer_id: customer!.id,
+  const payload = (): ContractDraft => ({ ...form, type: manualSrc ? form.type : "by_volume", customer_id: customer!.id,
+    price_reason: (form.price_reason ?? "").trim() || null,
     existing: isEx ? { number: ex.number.trim(), signed_on: ex.signed_on || null, platform: form.sign_method === "electronic" ? ex.platform : null,
       platform_id: form.sign_method === "electronic" ? ex.platform_id.trim() || null : null } : null, requisites: Object.fromEntries(Object.entries(form.requisites)
     .map(([k, v]) => [k, typeof v === "string" ? v.trim() || null : v])) as unknown as Requisites });
@@ -129,7 +154,10 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     try {
       const r = await contractsApi.check(payload(), ct?.id);
       setChecked(r);
-      toast(r.ok ? t("ctr_check_ok") : t("ctr_check_bad", { n: r.errors.length }), r.ok ? "success" : "warning");
+      const names = [...new Set(r.errors.map((e) => errLabel(e.field)))];
+      toast(r.ok ? t("ctr_check_ok") : t("ctr_check_bad_list", { n: r.errors.length, list: names.slice(0, 3).join(", ") + (names.length > 3 ? "…" : "") }),
+        r.ok ? "success" : "error");
+      if (!r.ok) window.setTimeout(() => errBox.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     } catch (e) { fail(e); } finally { setBusy(false); }
   };
   const save = async () => {
@@ -151,6 +179,15 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     } catch (e) { fail(e); } finally { setBusy(false); }
   };
   const errOf = (f: string) => checked?.errors.find((e) => e.field === f);
+  function errLabel(f: string): string {
+    const k = ERR_LABEL[f] ?? (`ctr_f_${f}` as MessageKey);
+    return k in MESSAGES ? t(k) : f;
+  }
+  const focusField = (f: string) => {
+    const el = document.querySelector<HTMLInputElement>(`#contract-wizard [name="${ERR_INPUT[f] ?? f}"]`);
+    if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); el.focus({ preventScroll: true }); }
+  };
+  const priceOff = form.type === "by_volume" && form.price != null && form.price > 0 && (tariff == null || Number(form.price) !== Number(tariff));
   const setReq = (k: ReqText, v: string) => { setForm({ ...form, requisites: { ...form.requisites, [k]: v } }); setChecked(null); };
   const set = <K extends keyof typeof form>(k: K, v: (typeof form)[K]) => { setForm({ ...form, [k]: v }); setChecked(null); };
   const helper = (f: string, hint?: string) => {
@@ -160,27 +197,40 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
 
   const steps = [t("ctr_step_customer"), t("ctr_step_data"), t("ctr_step_doc")];
   return (
-    <Dialog open onClose={() => !busy && close()} fullWidth maxWidth="lg" fullScreen={mobile} id="contract-wizard">
-      <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, pr: 6 }}>
-        {ct?.number ? t("ctr_title_n", { n: ct.display_number }) : t("new_contract")}
+    <Dialog open onClose={() => !busy && close()} fullWidth maxWidth="lg" fullScreen={mobile} id="contract-wizard" data-mode={vmode}
+      PaperProps={{ sx: { borderTop: 8, borderTopColor: MODE_COLOR[vmode] } }}>
+      <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, pr: 6, color: MODE_COLOR[vmode], fontWeight: 700 }}>
+        {ct?.number ? t("ctr_title_n", { n: ct.display_number }) : t(`ctr_mode_title_${vmode}` as MessageKey)}
         {ct && <StatusChip status={ct.status} />}
         <IconButton onClick={close} sx={{ position: "absolute", right: 8, top: 8 }} aria-label={t("close")}><CloseIcon /></IconButton>
       </DialogTitle>
       <DialogContent dividers>
-        {step >= 0 && <Stepper activeStep={step} alternativeLabel sx={{ mb: 2.5 }}>{steps.map((s) => <Step key={s}><StepLabel>{s}</StepLabel></Step>)}</Stepper>}
+        {step >= 0 && step < 2 && <Box id="ctr-mode-banner" data-mode={vmode} sx={{ mb: 2, px: 2, py: 1.25, borderLeft: 6, borderColor: MODE_COLOR[vmode],
+          borderRadius: 1, bgcolor: "action.hover" }}>
+          <Typography variant="body2" color="text.secondary">{t(`ctr_mode_banner_${vmode}` as MessageKey)}</Typography>
+        </Box>}
+        {step >= 0 && mode !== "excel" && <Stepper activeStep={step} alternativeLabel sx={{ mb: 2.5 }}>{steps.map((s) => <Step key={s}><StepLabel>{s}</StepLabel></Step>)}</Stepper>}
         {ct?.status === "returned" && ct.return_comment && <Alert severity="error" sx={{ mb: 2 }} id="ctr-returned">
           <b>{t("ctr_returned_by")}</b> {ct.return_comment}</Alert>}
         {step === 0 && <Stack spacing={2}>
-          <ToggleButtonGroup exclusive fullWidth value={mode} onChange={(_, v) => { if (v) { setMode(v); setCustomer(null); } }} id="ctr-mode"
+          <ToggleButtonGroup exclusive fullWidth value={mode} onChange={(_, v) => { if (v && v !== mode) switchMode(v); }} id="ctr-mode"
             sx={{ flexWrap: { xs: "wrap", sm: "nowrap" } }}>
-            <ToggleButton value="new" data-mode="new">{t("ctr_mode_new")}</ToggleButton>
-            <ToggleButton value="existing" data-mode="existing">{t("ctr_mode_existing")}</ToggleButton>
-            <ToggleButton value="excel" data-mode="excel">{t("ctr_mode_excel")}</ToggleButton>
+            {(["new", "existing", "excel"] as const).map((m) => <ToggleButton key={m} value={m} data-mode={m} sx={{ fontWeight: 700, borderTop: 4,
+              borderTopColor: `${MODE_COLOR[m]} !important`, "&.Mui-selected, &.Mui-selected:hover": { bgcolor: MODE_COLOR[m], color: "#fff" } }}>
+              {t(`ctr_mode_${m}` as MessageKey)}</ToggleButton>)}
           </ToggleButtonGroup>
           {mode === "excel" ? <ExistingImport fail={fail} onDone={() => { changed(); }} />
             : <CustomerStep districts={districts} onPick={pickCustomer} fail={fail} />}
         </Stack>}
         {step === 1 && customer && <Stack spacing={2}>
+          {checked && !checked.ok && <Alert severity="error" id="ctr-errors" ref={errBox} sx={{ scrollMarginTop: 16 }}>
+            <Typography fontWeight={700}>{t("ctr_errors_title", { n: checked.errors.length })}</Typography>
+            <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2.5 }}>
+              {checked.errors.map((e, i) => <li key={i} data-err={e.field}>
+                <Box component="button" type="button" onClick={() => focusField(e.field)} sx={{ all: "unset", cursor: "pointer", fontWeight: 600,
+                  textDecoration: "underline", "&:focus-visible": { outline: 2 } }}>{errLabel(e.field)}</Box> — {t(`ce_${e.code}` as MessageKey)}</li>)}
+            </Box>
+          </Alert>}
           <Typography variant="subtitle2" color="text.secondary">{t("ctr_requisites")} · {districtName(customer.district_id)}</Typography>
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" } }}>
             {REQ_FIELDS.map((f) => f.k === "cadastre"
@@ -199,17 +249,23 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
           <Divider />
           <Typography variant="subtitle2" color="text.secondary">{t("ctr_terms")}</Typography>
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "repeat(4, 1fr)" } }}>
-            {isEx
+            {manualSrc
               ? <TextField select size="small" name="type" label={t("contract_type")} value={form.type} onChange={(e) => set("type", e.target.value as ContractType)}>
                 {EX_TYPES.map((x) => <MenuItem key={x} value={x}>{t(`ct_${x}` as MessageKey)}</MenuItem>)}
               </TextField>
               : <TextField size="small" label={t("contract_type")} value={t("ct_by_volume")} InputProps={{ readOnly: true }} />}
-            {isEx && form.type !== "by_volume"
-              ? <TextField size="small" name="price" type="number" label={`${t("ctr_price")} (${t("ctr_vat_incl")})`} value={form.price ?? ""}
-                  onChange={(e) => set("price", e.target.value === "" ? null : Number(e.target.value))} error={!!errOf("price")} helperText={helper("price")} />
+            {manualSrc && (form.type !== "by_volume" || canPrice)
+              ? <TextField size="small" name="price" type="number" label={`${t("ctr_price")} (${t("ctr_vat_incl")})`} value={form.price ?? ""} required
+                  onChange={(e) => set("price", e.target.value === "" ? null : Number(e.target.value))} error={!!errOf("price")}
+                  helperText={errOf("price") ? helper("price") : form.type === "by_volume"
+                    ? (tariff ? t("ctr_tariff_ref", { p: fmtMoney(tariff) }) : tariff === null ? t("ctr_no_tariff") : "…") : undefined} />
               : <TextField size="small" name="price" label={t("ctr_price_tariff")} InputProps={{ readOnly: true }} id="ctr-tariff"
                   value={tariff ? fmtMoney(tariff) : tariff === null ? t("ctr_no_tariff") : "…"}
                   error={tariff === null || !!errOf("price")} helperText={errOf("price") ? helper("price") : t("ctr_tariff_hint")} />}
+            {manualSrc && canPrice && priceOff && <TextField size="small" name="price_reason" required label={t("ctr_price_reason")}
+              value={form.price_reason ?? ""} onChange={(e) => set("price_reason", e.target.value)} placeholder={t("ctr_price_reason_ph")}
+              error={!!errOf("price_reason")} helperText={errOf("price_reason") ? helper("price_reason") : t("ctr_price_reason_hint")}
+              sx={{ gridColumn: { md: "span 2" } }} inputProps={{ maxLength: 255 }} />}
             <TextField size="small" name="annual_volume" type="number" label={t("ctr_annual_volume")} value={form.annual_volume ?? ""}
               onChange={(e) => set("annual_volume", e.target.value === "" ? null : Number(e.target.value))}
               error={!!errOf("annual_volume")} helperText={helper("annual_volume")} />
@@ -279,7 +335,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
         {step === 1 && <>
           <Button id="ctr-check" variant="outlined" startIcon={<FactCheckIcon />} onClick={runCheck} disabled={busy}>{t("ctr_check")}</Button>
           <Button id="ctr-save" variant="contained" disableElevation onClick={save} disabled={busy || !checked?.ok}
-            sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>{t(isEx ? (exFile ? "ex_send_accountant" : "ex_save_await_pdf") : ct ? "ctr_save_changes" : "ctr_save_number")}</Button>
+            sx={{ bgcolor: MODE_COLOR[vmode], "&:hover": { bgcolor: MODE_HOVER[vmode] } }}>{t(isEx ? (exFile ? "ex_send_accountant" : "ex_save_await_pdf") : ct ? "ctr_save_changes" : "ctr_save_number")}</Button>
         </>}
       </DialogActions>
     </Dialog>

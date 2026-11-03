@@ -248,6 +248,9 @@ class Contract(TimestampMixin, Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     draft_data: Mapped[str | None] = mapped_column(Text)  # tugallanmagan forma (JSON) — tekshiruvdan o'tmagan
     source: Mapped[str] = mapped_column(String(10), default="flow", server_default="flow")  # flow | manual | import (mavjud shartnoma)
+    # Mavjud shartnoma: legal narxni qo'lda kiritgan bo'lsa — o'sha sanadagi ta'rif (solishtirish uchun) va farq sababi
+    tariff_price: Mapped[float | None] = mapped_column(Numeric(14, 2))
+    price_reason: Mapped[str | None] = mapped_column(String(255))
     customer: Mapped["Customer"] = relationship(viewonly=True)
     events: Mapped[list["ContractEvent"]] = relationship(order_by="ContractEvent.id", cascade="all, delete-orphan")
 

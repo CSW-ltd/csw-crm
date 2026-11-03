@@ -31,6 +31,15 @@ const openBlob = (p: Promise<Blob>, fail: (e: unknown) => void) => {
   const w = window.open("", "_blank");
   p.then((b) => { const u = URL.createObjectURL(b); if (w) w.location.href = u; }).catch((e) => { w?.close(); fail(e); });
 };
+/** Mavjud shartnomada legal qo'lda kiritgan narx ta'rifdan farq qilsa — buxgalter uchun belgi va sabab. */
+export function PriceOff({ c }: { c: ContractItem }) {
+  const { t } = useI18n();
+  if (c.type !== "by_volume" || !c.price_reason) return null;
+  return <Alert severity="warning" variant="outlined" data-price-off sx={{ py: 0 }}>
+    <b>{t("ctr_price_off")}.</b> {t("ctr_price_off_text", { p: fmtMoney(c.price ?? 0), t: c.tariff_price != null ? fmtMoney(c.tariff_price) : "—",
+      r: c.price_reason })}</Alert>;
+}
+
 export function AwaitChip({ c }: { c: ContractItem }) {
   const { t } = useI18n();
   if (!c.awaiting_scan) return null;
@@ -184,6 +193,7 @@ function ContractCard({ c, district, busy, onOpen, onApprove, onReturn, fail }: 
         {kv("ctr_submitted", c.submitted_by ? `${c.submitted_by}${c.signed_at ? ` · ${dt(c.signed_at)}` : ""}` : null)}
       </Box>
       {c.source && c.source !== "flow" && <Typography variant="caption" color="text.secondary">{t("ctr_src_" + c.source as MessageKey)}</Typography>}
+      <PriceOff c={c} />
       {c.status === "returned" && c.return_comment && <Alert severity="error" variant="outlined" sx={{ py: 0 }}>{c.return_comment}</Alert>}
       <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mt: "auto", pt: 0.5 }}>
         {c.status === "signed" && <>
@@ -227,6 +237,7 @@ function ContractView({ id, isLegal, isAcc, districts, startReturn, onClose, onC
         <Stack spacing={2}>
           {c.status === "returned" && c.return_comment && <Alert severity="error"><b>{t("ctr_returned_by")}</b> {c.return_comment}</Alert>}
           {c.status === "signed" && <Alert severity="warning" variant="outlined">{t("ctr_pending_hint")}</Alert>}
+          <PriceOff c={c} />
           {c.awaiting_scan && <Alert severity="warning" id="ctr-await-alert">{t(needPdf ? "ex_pdf_hint" : "ctr_paper_wait_hint")}</Alert>}
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr 1fr", md: "repeat(4, 1fr)" } }}>
             {row("cmp_name", cu?.name)}{row("stir", cu?.stir)}{row("district", districts.find((d) => d.id === cu?.district_id)?.name)}{row("director", cu?.director)}

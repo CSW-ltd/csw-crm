@@ -8,7 +8,7 @@ from app.models.enums import Role
 
 # bo'lim → amallar (frontend jadvali shu tartibda chiziladi)
 MODULES: dict[str, list[str]] = {
-    "customers": ["view", "create", "edit", "contract", "location_confirm", "import"],
+    "customers": ["view", "create", "edit", "contract", "existing_price", "location_confirm", "import"],  # existing_price — mavjud shartnomada narxni qo'lda kiritish (legal)
     "staff": ["view", "create", "edit", "deactivate", "reset_password", "permissions"],
     "vehicles": ["view", "create", "edit", "deactivate"],
     "settings": ["view", "radius_edit", "tariff"],  # tariff — o'z tumanlari ta'rifini belgilash (manager; admin yopadi/ochadi)
@@ -25,7 +25,7 @@ ROLE_TEMPLATES: dict[Role, list[str]] = {
     Role.admin: [],
     Role.manager: ["customers.view", "customers.location_confirm", "staff.view", "vehicles.view", "settings.view", "settings.tariff",
                    "requests.view", "stats.view", "orders.view", "orders.unlock", "accounting.view"],
-    Role.legal: ["customers.view", "customers.create", "customers.edit", "customers.contract", "appeals.view", "appeals.review",
+    Role.legal: ["customers.view", "customers.create", "customers.edit", "customers.contract", "customers.existing_price", "appeals.view", "appeals.review",
                  "requests.view", "orders.view", "orders.close", "accounting.view"],
     Role.gps: ["customers.view", "requests.view", "orders.view", "orders.print"],
     Role.operator: ["customers.view", "requests.view", "requests.create", "appeals.view", "appeals.create",

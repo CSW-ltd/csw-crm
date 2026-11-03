@@ -12,7 +12,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from uuid import uuid4
 
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, PrivateAttr
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -71,6 +71,17 @@ class ContractDraftIn(BaseModel):
     place: str | None = Field(None, max_length=100)
     sign_method: str = Field("electronic", pattern="^(electronic|paper)$")
     existing: ExistingMeta | None = None  # bo'lsa — «Mavjud shartnomani kiritish»
+    price_reason: str | None = Field(None, max_length=255)  # mavjud shartnoma: narx ta'rifdan farq qilsa — sababi (majburiy)
+    _tariff: Decimal | None = PrivateAttr(None)  # validate() to'ldiradi: boshlanish sanasidagi ta'rif
+
+
+def manual_price_allowed(actor: User, existing_src: bool) -> bool:
+    """Mavjud shartnomada (qo'lda/Excel) kub narxini legal o'zi kiritadi — «customers.existing_price» ruxsati bilan."""
+    return existing_src and actor.can("customers.existing_price")
+
+
+def price_differs(price, tariff) -> bool:
+    return tariff is None or price is None or Decimal(str(price)) != Decimal(str(tariff))
 
 
 # --- hisob ---
@@ -121,7 +132,8 @@ async def _overlap(db: AsyncSession, customer_id: int, vf: date, vt: date, own_i
     return (await db.execute(q.limit(1))).scalar_one_or_none()
 
 
-async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id: int | None = None) -> tuple[Customer, list[dict]]:
+async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id: int | None = None,
+                   existing_src: bool = False) -> tuple[Customer, list[dict]]:
     cust = await db.get(Customer, body.customer_id)
     if not cust:
         raise not_found("customer")
@@ -148,11 +160,21 @@ async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id:
     ex = body.existing
     if body.type != ContractType.by_volume and not ex:
         errs.append(_err("type", "type_volume_only"))  # yangi shartnoma — faqat kub (ta'rif); reys/oylik — mavjud shartnomani kiritishda
+    existing_src = existing_src or ex is not None
     if body.type == ContractType.by_volume:
-        # Narx — davlat ta'rifi (shartnoma boshlanish sanasidagi, tuman → viloyat); qo'lda kiritilmaydi
-        body.price = await tariffs.price_for(db, cust.district_id, body.valid_from or local_day(utcnow()))
-        if not body.price:
-            errs.append(_err("price", "no_tariff"))
+        # Narx — davlat ta'rifi (shartnoma boshlanish sanasidagi, tuman → viloyat). Mavjud shartnomada (ruxsat bilan) legal eski narxni
+        # o'zi kiritadi; ta'rifdan farq qilsa (yoki o'sha sanaga ta'rif yo'q bo'lsa) — sababi majburiy.
+        tariff = await tariffs.price_for(db, cust.district_id, body.valid_from or local_day(utcnow()))
+        body._tariff = tariff
+        if manual_price_allowed(actor, existing_src):
+            if not body.price or body.price <= 0:
+                errs.append(_err("price", "required"))
+            elif price_differs(body.price, tariff) and len((body.price_reason or "").strip()) < 3:
+                errs.append(_err("price_reason", "required"))
+        else:
+            body.price = tariff
+            if not body.price:
+                errs.append(_err("price", "no_tariff"))
     elif not body.price or body.price <= 0:
         errs.append(_err("price", "required"))
     if ex:
@@ -190,11 +212,16 @@ async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id:
 
 
 async def check(db: AsyncSession, actor: User, body: ContractDraftIn, own_id: int | None = None) -> dict:
-    _, errs = await validate(db, actor, body, own_id)
+    existing_src = False
+    if own_id:
+        own = await db.get(Contract, own_id)
+        existing_src = bool(own and own.source in ("manual", "import"))
+    _, errs = await validate(db, actor, body, own_id, existing_src)
     t = totals(body.type, body.price, body.annual_volume, body.annual_trips, body.valid_from, body.valid_to)
     return {"ok": not errs, "errors": errs, "totals": {"qty": float(t["qty"]), "unit": t["unit"], "net": float(t["net"]), "vat": float(t["vat"]),
                                                       "total": float(t["total"]), "words": money_words(t["total"]),
-                                                      "price": float(body.price) if body.price else None}}
+                                                      "price": float(body.price) if body.price else None,
+                                                      "tariff": float(body._tariff) if body._tariff else None}}
 
 
 def _raise(errs: list[dict]) -> None:
@@ -227,6 +254,11 @@ def _apply(cust: Customer, ct: Contract, body: ContractDraftIn) -> None:
     ct.draft_data = None
     ct.type, ct.price, ct.annual_volume, ct.annual_trips = body.type, body.price, body.annual_volume, body.annual_trips
     ct.valid_from, ct.valid_to, ct.place, ct.sign_method = body.valid_from, body.valid_to, (body.place or "").strip(), body.sign_method
+    if body.type == ContractType.by_volume and ct.source in ("manual", "import"):
+        ct.tariff_price = body._tariff
+        ct.price_reason = ((body.price_reason or "").strip() or None) if price_differs(body.price, body._tariff) else None
+    else:
+        ct.tariff_price = ct.price_reason = None
 
 
 def _event(ct: Contract, actor: User, action: str, comment: str | None = None) -> None:
@@ -265,12 +297,20 @@ async def create_existing(db: AsyncSession, storage: Storage, actor: User, body:
     _event(ct, actor, "imported")
     db.add(ct)
     await db.flush()
-    log(db, ct, cust, actor, "act_contract_imported", f"Mavjud shartnoma kiritildi: {ct.display_number} «{cust.name}» — PDF kutilmoqda")
+    log(db, ct, cust, actor, "act_contract_imported", f"Mavjud shartnoma kiritildi: {ct.display_number} «{cust.name}» — PDF kutilmoqda"
+        + _price_note(ct))
     if file:
         await _put_scan(storage, ct, file)
         _promote_existing(db, ct, cust, actor)
     await db.commit()
     return await get(db, actor, ct.id)
+
+
+def _price_note(ct: Contract) -> str:
+    if not ct.price_reason:
+        return ""
+    tariff = _fmt(Decimal(str(ct.tariff_price)), 0) if ct.tariff_price is not None else "yo'q"
+    return f"; narx qo'lda: {_fmt(Decimal(str(ct.price)), 0)} (ta'rif {tariff}) — {ct.price_reason}"
 
 
 def awaiting_scan(ct: Contract) -> bool:
@@ -314,14 +354,14 @@ async def update(db: AsyncSession, actor: User, contract_id: int, body: Contract
     if ct.status not in ("draft", "returned"):
         raise conflict("contract_locked", "Shartnoma imzolangan — faqat buxgalter qaytarsa o'zgartiriladi")
     body.customer_id = ct.customer_id
-    cust, errs = await validate(db, actor, body, own_id=ct.id)
+    cust, errs = await validate(db, actor, body, own_id=ct.id, existing_src=ct.source in ("manual", "import"))
     _raise(errs)
     _apply(cust, ct, body)
     if not ct.number:  # tugallanmagan loyiha — raqam tekshiruvdan o'tgach beriladi
         prov = await _provider(db, cust.district_id)
         ct.number = await next_number(db, prov.code if prov else "SH", body.valid_from.year)
     _event(ct, actor, "edited")
-    log(db, ct, cust, actor, "act_contract_saved", f"Shartnoma ma'lumotlari saqlandi: {ct.display_number} «{cust.name}»")
+    log(db, ct, cust, actor, "act_contract_saved", f"Shartnoma ma'lumotlari saqlandi: {ct.display_number} «{cust.name}»" + _price_note(ct))
     await db.commit()
     return await get(db, actor, ct.id)
 
@@ -495,6 +535,7 @@ def out(ct: Contract, used: float | None = None, with_events: bool = False) -> d
                       "phone": c.phone, "legal_address": c.legal_address, "address": c.address, "bank": c.bank, "mfo": c.mfo,
                       "account": c.account, "oked": c.oked, "cadastre": c.cadastre, "is_rented": c.is_rented} if c else None,
          "draft": json.loads(ct.draft_data) if ct.draft_data else None, "source": ct.source, "awaiting_scan": awaiting_scan(ct),
+         "tariff_price": float(ct.tariff_price) if ct.tariff_price is not None else None, "price_reason": ct.price_reason,
          "submitted_by": next((e.actor.full_name for e in reversed(ct.events) if e.action in ("signed", "resubmitted", "imported") and e.actor),
                               None) if "events" in ct.__dict__ else None}
     if used is not None:
