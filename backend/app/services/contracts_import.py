@@ -59,7 +59,8 @@ COLUMNS = [("district", "Tuman / shahar", 22), ("name", "Korxona nomi", 32), ("s
            ("phone", "Telefon", 16), ("legal_address", "Yuridik manzil", 30), ("address", "Obyekt manzili", 30), ("bank", "Bank", 22),
            ("mfo", "MFO (5)", 9), ("account", "Hisob raqam (20)", 24), ("oked", "OKED", 9), ("number", "Shartnoma raqami", 18),
            ("platform_id", "Platforma ID (Didox / hujjat.uz)", 22), ("type", "Turi (kub / reys / oylik)", 14),
-           ("price", "Narx (reys/oylik uchun, QQS bilan)", 16), ("annual_volume", "Yillik hajm, m³", 12),
+           ("price", "Narx, QQS bilan (shartnomadagi)", 16), ("price_reason", "Narx sababi (ta'rifdan farq qilsa)", 30),
+           ("annual_volume", "Yillik hajm, m³", 12),
            ("signed_on", "Imzolangan sana", 14), ("valid_from", "Boshlanish", 13), ("valid_to", "Tugash", 13)]
 
 
@@ -72,7 +73,7 @@ def template_xlsx() -> bytes:
         c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="00A651")
         ws.column_dimensions[c.column_letter].width = width
     sample = ["Asaka tumani", "\"Namuna\" MChJ", "300000000", "Namuna Direktor", "90 123 45 67", "Asaka, Namuna ko'chasi 1",
-              "Asaka, Namuna ko'chasi 1", "DEMO bank", "00000", "20208000000000000000", "56290", "1234", "", "kub", "", "120",
+              "Asaka, Namuna ko'chasi 1", "DEMO bank", "00000", "20208000000000000000", "56290", "1234", "", "kub", "75000", "2025 yilgi shartnoma, eski ta'rif", "120",
               "01.03.2026", "01.03.2026", "31.12.2026"]
     for i, v in enumerate(sample, start=1):
         ws.cell(row=2, column=i, value=v).font = Font(italic=True, color="888888")
@@ -116,7 +117,8 @@ def _digits(v) -> str:
 async def import_file(db: AsyncSession, actor: User, file_name: str, content: bytes, dry_run: bool) -> dict:
     from app.services.table_readers import read_tables
     _, tables = read_tables(file_name, content)
-    titles = {t.lower(): k for k, t, _ in COLUMNS}
+    titles = {t.lower(): k for k, t, _ in COLUMNS} | {"narx (reys/oylik uchun, qqs bilan)": "price"}  # PR #20 shabloni ham o'qiladi
+    manual = actor.can("customers.existing_price")
     districts = list((await db.execute(select(District).where(District.is_active.is_(True)))).scalars())
     by_dname = {name_key(d.name): d for d in districts}
     scope = access.scope(actor)
@@ -173,6 +175,19 @@ async def import_file(db: AsyncSession, actor: User, file_name: str, content: by
             err = "bad_date"
         elif ctype == ContractType.by_volume and not volume:
             err = "volume_required"
+        tariff, reason = None, str(g("price_reason") or "").strip() or None
+        if not err and ctype == ContractType.by_volume:
+            # Kub: ruxsat bo'lsa — shartnomadagi (eski) narx majburiy, ta'rifdan farq qilsa sababi bilan; aks holda — ta'rif
+            tariff = await price_for(db, d.id, vf)
+            if manual:
+                if not price:
+                    err = "price_required"
+                elif price != tariff and (not reason or len(reason) < 3):
+                    err = "price_reason_required"
+            else:
+                price, reason = tariff, None
+                if not price:
+                    err = "no_tariff"
         if not err:
             cust = next((c for c in customers if c.district_id == d.id and ((stir and c.stir == stir) or c.name_key == name_key(name))), None)
             if stir and not cust:
@@ -192,7 +207,8 @@ async def import_file(db: AsyncSession, actor: User, file_name: str, content: by
                                              "legal_address": str(g("legal_address") or "").strip() or None,
                                              "address": str(g("address") or "").strip() or None, "bank": str(g("bank") or "").strip() or None,
                                              "mfo": mfo or None, "account": account or None, "oked": _digits(g("oked")) or None},
-                     "_contract": (str(g("platform_id") or "").strip() or None, price, volume, signed or vf)})
+                     "_contract": (str(g("platform_id") or "").strip() or None, price, volume, signed or vf,
+                                   tariff, reason if tariff is None or price != tariff else None)})
     if header is None:
         raise invalid("bad_template", "Ustunlar topilmadi — shablondan foydalaning")
     created = 0
@@ -212,11 +228,12 @@ async def import_file(db: AsyncSession, actor: User, file_name: str, content: by
                     setattr(cust, k, v)
             if r["stir"] and not cust.stir:
                 cust.stir = r["stir"]
-            pid, price, volume, signed = r["_contract"]
-            if ContractType(r["type"]) == ContractType.by_volume:
-                price = await price_for(db, r["district_id"], r["valid_from"]) or price
-            db.add(_make(cust.id, actor, r["number"], "didox" if pid else None, pid, ContractType(r["type"]), price, volume, signed,
-                         r["valid_from"], r["valid_to"], "electronic" if pid else "paper", "import"))
+            pid, price, volume, signed, tariff, reason = r["_contract"]
+            c = _make(cust.id, actor, r["number"], "didox" if pid else None, pid, ContractType(r["type"]), price, volume, signed,
+                      r["valid_from"], r["valid_to"], "electronic" if pid else "paper", "import")
+            if c.type == ContractType.by_volume:
+                c.tariff_price, c.price_reason = tariff, reason
+            db.add(c)
             created += 1
         situation.activity(db, "act_contract_import", f"Excel'dan mavjud shartnomalar kiritildi (tasdiqqa): {created} ta ({file_name})",
                            params={"count": created, "file": file_name}, actor_id=actor.id)

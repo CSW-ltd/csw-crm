@@ -5,6 +5,8 @@ from datetime import date, timedelta
 from docx import Document
 from openpyxl import load_workbook
 
+from sqlalchemy import select
+
 from app.models import District
 from tests.test_accounting import _setup
 from tests.test_contracts import REQ, body
@@ -134,13 +136,16 @@ async def test_existing_contract_full_data_and_accountant_approval(world, client
     tpl = await legal.get("/api/v1/contracts/existing/template")
     wb = load_workbook(io.BytesIO(tpl.content))
     ws = wb.active
-    rows = [["Asaka tumani", "Yangi Import MChJ", "301112223", "Dir", "90 111 22 33", "Asaka", "Asaka", "Bank", "00873", "20208000900123456001",
-             "56290", "IMP-1", "", "kub", "", "50", "01.02.2026", "01.02.2026", "31.12.2026"],
-            ["Asaka tumani", "Ikkinchi MChJ", "301112224", "", "90 111 22 34", "A", "A", "B", "00873", "20208000900123456002", "", "IMP-2", "",
-             "kub", "", "10", "01.02.2026", "01.02.2026", "31.12.2026"],
-            ["Yo'q tuman", "X MChJ", "", "", "", "", "", "", "", "", "", "IMP-3", "", "kub", "", "", "", "01.02.2026", "31.12.2026"],
-            ["Asaka tumani", "Uchinchi MChJ", "301112225", "D", "90 111 22 35", "A", "A", "B", "00873", "20208000900123456003", "", "IMP-4", "",
-             "kub", "", "", "01.02.2026", "01.02.2026", "31.12.2026"]]
+    R = lambda name, stir, dr, num, price, reason, vol, acc="20208000900123456001": ["Asaka tumani", name, stir, dr, "90 111 22 33", "A", "A", "B",  # noqa: E731
+                                                                               "00873", acc, "", num, "", "kub", price, reason, vol,
+                                                                               "01.02.2026", "01.02.2026", "31.12.2026"]
+    rows = [R("Yangi Import MChJ", "301112223", "Dir", "IMP-1", "84000", "", "50"),
+            R("Ikkinchi MChJ", "301112224", "", "IMP-2", "84000", "", "10", "20208000900123456002"),
+            ["Yo'q tuman", "X MChJ", "", "", "", "", "", "", "", "", "", "IMP-3", "", "kub", "", "", "", "", "01.02.2026", "31.12.2026"],
+            R("Uchinchi MChJ", "301112225", "D", "IMP-4", "84000", "", "", "20208000900123456003"),
+            R("Narxsiz MChJ", "301112226", "D", "IMP-5", "", "", "20", "20208000900123456004"),
+            R("Sababsiz MChJ", "301112227", "D", "IMP-6", "75000", "", "20", "20208000900123456005"),
+            R("Eski narx MChJ", "301112228", "D", "IMP-7", "75000", "2025 yilgi shartnoma", "20", "20208000900123456006")]
     for r_ in rows:
         ws.append(r_)
     buf = io.BytesIO(); wb.save(buf)
@@ -148,8 +153,11 @@ async def test_existing_contract_full_data_and_accountant_approval(world, client
                                 files={"file": ("s.xlsx", buf.getvalue(), "application/octet-stream")})
     dry = (await up(True)).json()
     errs = {e["value"]: e["error"] for e in dry["errors"]}
-    assert dry["ok"] == 1 and errs == {"IMP-2": "director_required", "IMP-3": "district_not_found", "IMP-4": "volume_required"}, dry
-    assert (await up(False)).json()["created"] == 1
+    assert dry["ok"] == 2 and errs == {"IMP-2": "director_required", "IMP-3": "district_not_found", "IMP-4": "volume_required",
+                                       "IMP-5": "price_required", "IMP-6": "price_reason_required"}, dry
+    assert (await up(False)).json()["created"] == 2
+    old = (await acc.get("/api/v1/contracts", params={"q": "IMP-7"})).json()["items"][0]
+    assert old["price"] == 75000 and old["tariff_price"] == 84000 and old["price_reason"] == "2025 yilgi shartnoma"
     found = (await acc.get("/api/v1/contracts", params={"q": "IMP-1"})).json()["items"]
     assert found[0]["status"] == "draft" and found[0]["awaiting_scan"] and found[0]["source"] == "import" and found[0]["price"] == 84000
     up2 = (await legal.post(f"/api/v1/contracts/{found[0]['id']}/scan-upload", files={"file": ("a.pdf", b"%PDF-1", "application/pdf")})).json()
@@ -210,3 +218,49 @@ async def test_manager_tariff_permission_toggle(world, client_factory, sessionma
     assert (await mgr.post("/api/v1/tariffs", json={"district_id": a, "price": 86000, "valid_from": str(T)})).status_code == 403
     d = next(x for r in (await mgr.get("/api/v1/tariffs")).json()["regions"] for x in r["districts"] if x["district_id"] == a)
     assert not d["can_edit"]
+
+
+async def test_existing_manual_price_reason_and_permission(world, client_factory, sessionmaker):
+    """PR #21: mavjud shartnomada kub narxini legal kiritadi; ta'rifdan farq qilsa — sabab majburiy; ruxsat o'chirilsa — ta'rif."""
+    from app.models import Tariff, User, UserPermission
+    async with sessionmaker() as s_:
+        for rid in await _region_ids(sessionmaker, world):
+            s_.add(Tariff(region_id=rid, price=84000, valid_from=date(T.year - 1, 1, 1)))
+        await s_.commit()
+    await _setup(world, sessionmaker)
+    legal, acc, admin = await client_factory("legal"), await client_factory("buxgalter"), await client_factory("admin")
+    cid = (await legal.post("/api/v1/customers", json={"name": "Eski Narx MChJ", "district_id": world["districts"]["a"]})).json()["id"]
+    meta = {"number": "OLD-75", "signed_on": "2026-01-10"}
+    base = body(cid, price=None, valid_from="2026-01-10", valid_to="2026-12-31", sign_method="paper", existing=meta)
+    errs = lambda r: {(e["field"], e["code"]) for e in r["errors"]}  # noqa: E731
+    r = (await legal.post("/api/v1/contracts/check", json=base)).json()
+    assert ("price", "required") in errs(r) and r["totals"]["tariff"] == 84000
+    r = (await legal.post("/api/v1/contracts/check", json={**base, "price": 75000})).json()
+    assert ("price_reason", "required") in errs(r)
+    r = (await legal.post("/api/v1/contracts/check", json={**base, "price": 84000})).json()
+    assert r["ok"], r
+    ok = {**base, "price": 75000, "price_reason": "2025 yilgi shartnoma, eski ta'rif"}
+    r = (await legal.post("/api/v1/contracts/check", json=ok)).json()
+    assert r["ok"] and r["totals"]["total"] == 75000 * 100
+    c = (await legal.post("/api/v1/contracts/existing", json=ok)).json()
+    assert c["price"] == 75000 and c["tariff_price"] == 84000 and c["price_reason"].startswith("2025")
+    c = (await legal.post(f"/api/v1/contracts/{c['id']}/scan-upload", files={"file": ("a.pdf", b"%PDF-1", "application/pdf")})).json()
+    # Buxgalter qaytaradi → legal tuzatadi: qo'lda narx saqlanadi (ta'rifga almashtirilmaydi)
+    await acc.post(f"/api/v1/contracts/{c['id']}/return", json={"comment": "Hajmni tekshiring"})
+    fix = {k: v for k, v in ok.items() if k != "existing"} | {"annual_volume": 90}
+    r = await legal.put(f"/api/v1/contracts/{c['id']}", json=fix)
+    assert r.status_code == 200 and r.json()["price"] == 75000 and r.json()["price_reason"], r.text
+    bad = await legal.put(f"/api/v1/contracts/{c['id']}", json={**fix, "price_reason": None})
+    assert {"field": "price_reason", "code": "required"} in bad.json()["error"]["details"]["errors"]
+    # Faoliyat jurnalida narx izohi
+    ev = (await admin.get("/api/v1/situation", params={"kind": "act_contract_imported"})).json()
+    items = ev["items"] if isinstance(ev, dict) else ev
+    assert any("narx qo'lda: 75 000 (ta'rif 84 000)" in (x.get("text") or x.get("message") or str(x)) for x in items)
+    # Admin ruxsatni o'chirsa — narx yana ta'rifdan
+    async with sessionmaker() as s_:
+        from sqlalchemy import delete
+        uid = (await s_.execute(select(User.id).where(User.username == "legal"))).scalar_one()
+        await s_.execute(delete(UserPermission).where(UserPermission.user_id == uid, UserPermission.code == "customers.existing_price"))
+        await s_.commit()
+    r = (await legal.post("/api/v1/contracts/check", json={**base, "existing": {**meta, "number": "OLD-76"}, "price": 1})).json()
+    assert r["totals"]["price"] == 84000 and not any(e["field"].startswith("price") for e in r["errors"]), r
