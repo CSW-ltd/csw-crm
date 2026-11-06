@@ -26,7 +26,8 @@ async def tariffs(world, sessionmaker):
         await s.commit()
 REQ = {"name": "\"Yangi Test\" MChJ", "stir": "309111222", "director": "Aliyev Vali", "phone": "90 123 45 67",
        "legal_address": "Asaka sh., Bog'bon ko'chasi 5", "address": "Asaka sh., Bog'bon ko'chasi 5", "bank": "DEMO bank",
-       "mfo": "00873", "account": "20208000900123456001", "oked": "56290", "cadastre": "17:15:41:01:02:0001"}
+       "mfo": "00873", "account": "20208000900123456001", "oked": "56290", "cadastre": "17:15:41:01:02:0001",
+       "lat": 40.6415, "lng": 72.2390}
 
 
 def body(cid, **kw):

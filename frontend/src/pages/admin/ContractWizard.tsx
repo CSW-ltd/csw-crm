@@ -10,6 +10,7 @@ import DrawIcon from "@mui/icons-material/Draw";
 import { contractsApi, customersApi, tariffsApi } from "@/api/endpoints";
 import { onlyDigits } from "@/components/DigitsField";
 import { errorCode, errorMessage } from "@/api/client";
+import { CoordFields } from "@/components/CoordFields";
 import { STAGE } from "@/components/Stage";
 import { useCan } from "@/hooks/useCan";
 import { MESSAGES } from "@/i18n/messages";
@@ -25,8 +26,8 @@ const EX_TYPES: ContractType[] = ["by_volume", "per_trip", "monthly", "one_off"]
 const todayIso = () => new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
 const yearEnd = () => `${todayIso().slice(0, 4)}-12-31`;
 const EMPTY_REQ: Requisites = { name: "", stir: "", director: "", phone: "", legal_address: "", address: "", bank: "", mfo: "", account: "",
-  oked: "", cadastre: "", is_rented: false };
-type ReqText = Exclude<keyof Requisites, "is_rented">;
+  oked: "", cadastre: "", is_rented: false, lat: null, lng: null };
+type ReqText = Exclude<keyof Requisites, "is_rented" | "lat" | "lng">;
 const REQ_FIELDS: { k: ReqText; span: number; digits?: number }[] = [
   { k: "name", span: 2 }, { k: "stir", span: 1, digits: 9 }, { k: "director", span: 2 }, { k: "phone", span: 1 },
   { k: "legal_address", span: 3 }, { k: "address", span: 2 }, { k: "cadastre", span: 1 },
@@ -54,7 +55,7 @@ const EMPTY_EX = { number: "", signed_on: "", platform: "didox", platform_id: ""
 /** Xato maydoni → yorliq kaliti va formadagi input nomi. */
 const ERR_LABEL: Record<string, MessageKey> = { price: "ctr_price", price_reason: "ctr_price_reason", annual_volume: "ctr_annual_volume",
   annual_trips: "ctr_annual_trips" as MessageKey, place: "ctr_place", valid_from: "valid_from", valid_to: "valid_to", number: "contract_no",
-  signed_on: "signed_on", platform_id: "ctr_platform_id", type: "contract_type" };
+  signed_on: "signed_on", platform_id: "ctr_platform_id", type: "contract_type", coords: "coords_title" };
 const ERR_INPUT: Record<string, string> = { number: "ex_number", signed_on: "ex_signed", platform_id: "ex_pid" };
 
 /** «Yangi shartnoma»: 1) korxona 2) rekvizitlar va shartlar → «Tekshirish» → raqam 3) hujjat (PDF/Word) → «Imzolandi — buxgalteriyaga yuborish». */
@@ -82,6 +83,8 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   const [ex, setEx] = useState(EMPTY_EX);
   const [exFile, setExFile] = useState<File | null>(null);
   const exFileRef = useRef<HTMLInputElement>(null);
+  // Korxonaning bazadagi nuqtasi: o'zgarmasa maqom saqlanadi, o'zgarsa — «kutilmoqda»
+  const [origLoc, setOrigLoc] = useState<{ lat: number | null; lng: number | null; status?: string } | null>(null);
   const isEx = mode === "existing";
   // Qo'lda/Excel kiritilgan shartnoma (yangi yoki qaytarilgani tuzatilmoqda) — narxni legal kiritadi (ruxsat bilan), sabab majburiy
   const manualSrc = isEx || ct?.source === "manual" || ct?.source === "import";
@@ -91,11 +94,12 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     setMode(m); setCustomer(null); setForm(emptyForm()); setEx(EMPTY_EX); setExFile(null); setChecked(null); setTariff(undefined);
   };
   const fromCustomer = (c: Partial<Requisites> & { name: string }) => ({ ...EMPTY_REQ, ...Object.fromEntries(Object.entries(c)
-    .filter(([k]) => k in EMPTY_REQ).map(([k, v]) => [k, k === "is_rented" ? !!v : v ?? ""])) } as Requisites);
+    .filter(([k]) => k in EMPTY_REQ).map(([k, v]) => [k, k === "is_rented" ? !!v : k === "lat" || k === "lng" ? v ?? null : v ?? ""])) } as Requisites);
   const fromContract = useCallback((c: ContractItem) => {
     setCt(c);
     if (c.customer) {
       setCustomer({ id: c.customer.id, name: c.customer.name, district_id: c.customer.district_id });
+      setOrigLoc({ lat: c.customer.lat ?? null, lng: c.customer.lng ?? null, status: c.customer.location_status });
       const d = c.draft;
       const manual = c.source === "manual" || c.source === "import";
       setForm({ requisites: fromCustomer(d?.requisites ?? c.customer), type: manual ? c.type : "by_volume", price: c.price, price_reason: c.price_reason ?? "",
@@ -118,6 +122,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     if (mode === "existing") {
       try {
         const c = await customersApi.get(id);
+        setOrigLoc({ lat: c.lat, lng: c.lng, status: c.location_status });
         setCustomer({ id: c.id, name: c.name, district_id: c.district_id });
         setForm((f) => ({ ...f, place: f.place || districtName(c.district_id), sign_method: "paper", requisites: fromCustomer(c as unknown as Requisites) }));
         setChecked(null);
@@ -127,6 +132,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     }
     try {
       const c = await customersApi.get(id);
+      setOrigLoc({ lat: c.lat, lng: c.lng, status: c.location_status });
       const draft = await contractsApi.start(c.id);  // «Tugallanmagan shartnomalar»da darhol paydo bo'ladi
       changed();
       setCt(draft);
@@ -179,6 +185,12 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     } catch (e) { fail(e); } finally { setBusy(false); }
   };
   const errOf = (f: string) => checked?.errors.find((e) => e.field === f);
+  const coordStatus = () => {
+    const { lat, lng } = form.requisites;
+    if (lat == null || lng == null) return t("coords_status_empty");
+    const same = origLoc?.lat != null && origLoc.lng != null && Math.abs(origLoc.lat - lat) < 1e-6 && Math.abs(origLoc.lng - lng) < 1e-6;
+    return same && origLoc?.status === "confirmed" ? t("coords_status_confirmed") : t("coords_status_pending");
+  };
   function errLabel(f: string): string {
     const k = ERR_LABEL[f] ?? (`ctr_f_${f}` as MessageKey);
     return k in MESSAGES ? t(k) : f;
@@ -245,6 +257,9 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
               helperText={helper(f.k, f.digits && f.k !== "oked" ? String(f.digits) : undefined)}
               inputProps={f.digits ? { inputMode: "numeric", maxLength: f.digits } : undefined}
               sx={{ gridColumn: { md: `span ${f.span}` } }} />)}
+            <CoordFields lat={form.requisites.lat} lng={form.requisites.lng} error={errOf("coords") ? helper("coords") : undefined}
+              status={coordStatus()}
+              onChange={(lat, lng) => { setForm((f) => ({ ...f, requisites: { ...f.requisites, lat, lng } })); setChecked(null); }} />
           </Box>
           <Divider />
           <Typography variant="subtitle2" color="text.secondary">{t("ctr_terms")}</Typography>

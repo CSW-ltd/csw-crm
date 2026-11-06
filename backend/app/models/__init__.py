@@ -174,6 +174,8 @@ class Customer(TimestampMixin, Base):
     lat: Mapped[float | None] = mapped_column(Float)
     lng: Mapped[float | None] = mapped_column(Float)
     location_status: Mapped[LocationStatus] = mapped_column(enum_col(LocationStatus), default=LocationStatus.none, server_default="none")
+    # Koordinata kim tomonidan: legal (shartnomada) | driver (birinchi tashrif) | manager (tasdiq/qo'lda)
+    location_source: Mapped[str | None] = mapped_column(String(10))
     source: Mapped[str] = mapped_column(String(10), default="manual", server_default="manual")
     import_batch_id: Mapped[int | None] = mapped_column(ForeignKey("import_batches.id"))
     district: Mapped[District] = relationship()

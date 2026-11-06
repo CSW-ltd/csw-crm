@@ -17,3 +17,22 @@ def distance_m(lat1: float, lng1: float, lat2: float, lng2: float) -> int:
 
 def valid_coords(lat: float, lng: float) -> bool:
     return -90 <= lat <= 90 and -180 <= lng <= 180
+
+
+# O'zbekiston chegarasi (taxminiy to'rtburchak) — kiritilgan koordinatani tekshirish uchun
+UZ_LAT, UZ_LNG = (37.0, 46.0), (55.0, 74.0)
+
+
+def in_uzbekistan(lat: float, lng: float) -> bool:
+    return UZ_LAT[0] <= lat <= UZ_LAT[1] and UZ_LNG[0] <= lng <= UZ_LNG[1]
+
+
+def coords_error(lat: float | None, lng: float | None) -> str | None:
+    """None — to'g'ri. Aks holda xato kodi: required | swapped (kenglik/uzunlik almashgan) | out_of_uz."""
+    if lat is None or lng is None:
+        return "required"
+    if in_uzbekistan(lat, lng):
+        return None
+    if in_uzbekistan(lng, lat):
+        return "swapped"
+    return "out_of_uz"

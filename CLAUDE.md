@@ -61,7 +61,7 @@ Muhim: testlar SQLite'da ishlaydi — MySQL'ga xos xatolar ko'rinmaydi. Baza/dra
 
 ## Kod konvensiyalari
 
-- **Migratsiyalar:** `backend/alembic/versions/NNNN_nom.py`, ketma-ket raqam (oxirgisi `0019_contract_delete_archive`, keyingisi `0020_...`). SQLite uchun `batch_alter_table` ishlatiladi.
+- **Migratsiyalar:** `backend/alembic/versions/NNNN_nom.py`, ketma-ket raqam (oxirgisi `0020_customer_location_source`, keyingisi `0021_...`). SQLite uchun `batch_alter_table` ishlatiladi.
 - **Huquqlar:** `backend/app/core/permissions.py` — modul/amal katalogi va rol shablonlari (`apply_template`); tekshiruv `actor.can("modul.amal")`, frontendda `useCan`.
 - **i18n:** `frontend/src/i18n/messages.ts`, har kalit `[uz, ru, en]`. Yangi kalitlar `"  // backend xato kodlari\n"` markeridan oldinga qo'shiladi.
 - **Xatolar:** backend mashina o'qiydigan xato kodlari qaytaradi (masalan `reason_required`), frontend ularni i18n orqali ko'rsatadi.

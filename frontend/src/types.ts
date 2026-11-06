@@ -346,7 +346,7 @@ export interface ProviderReq { id: number; name: string; code: string; region_id
 export type ContractStatus = "draft" | "signed" | "returned" | "approved";
 export interface Requisites { name: string; stir: string | null; director: string | null; phone: string | null; legal_address: string | null;
   address: string | null; bank: string | null; mfo: string | null; account: string | null; oked: string | null; cadastre: string | null;
-  is_rented?: boolean }
+  is_rented?: boolean; lat?: number | null; lng?: number | null }
 export interface ContractDraft { customer_id: number; requisites: Requisites; type: ContractType; price: number | null; annual_volume: number | null;
   annual_trips: number | null; valid_from: string; valid_to: string; place: string; sign_method: "electronic" | "paper";
   existing?: { number: string; signed_on: string | null; platform?: string | null; platform_id?: string | null } | null; price_reason?: string | null }
@@ -358,7 +358,7 @@ export interface ContractItem { id: number; number: string | null; platform: str
   valid_from: string; valid_to: string; signed_on: string | null; place: string | null; sign_method: "electronic" | "paper" | null;
   has_scan: boolean; return_comment: string | null; signed_at: string | null; approved_at: string | null; created_at: string;
   total: number; vat: number; is_active: boolean; used_m3?: number; usage_pct?: number; usage_level?: "ok" | "warn" | "over";
-  customer: Requisites & { id: number; code: string | null; district_id: number } | null; events?: ContractEventItem[];
+  customer: Requisites & { id: number; code: string | null; district_id: number; location_status?: LocationStatus } | null; events?: ContractEventItem[];
   draft?: Partial<ContractDraft> & { requisites?: Requisites } | null; source?: "flow" | "manual" | "import"; awaiting_scan?: boolean; submitted_by?: string | null; tariff_price?: number | null; price_reason?: string | null }
 export interface ExistingContract { customer_id: number; number: string; platform?: string | null; platform_id?: string | null; type: ContractType;
   price?: number | null; annual_volume?: number | null; signed_on: string; valid_from: string; valid_to: string; sign_method: "electronic" | "paper" }

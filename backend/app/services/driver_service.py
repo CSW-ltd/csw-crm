@@ -128,16 +128,26 @@ async def complete(db: AsyncSession, driver: User, request_id: int, data: Comple
     cust = req.customer
     note = None
     first_visit = False
+    legal_check = None  # yurist kiritgan (tasdiqlanmagan) nuqta: "confirmed" | "mismatch"
     if cust.location_status == LocationStatus.confirmed and cust.lat is not None and cust.lng is not None:
         dist = distance_m(cust.lat, cust.lng, data.lat, data.lng)
         in_radius = dist <= radius
         if not in_radius:
             note = f"radiusdan tashqarida: {dist} m"
+    elif cust.location_status == LocationStatus.pending and cust.location_source == "legal" and cust.lat is not None and cust.lng is not None:
+        # Shartnomada yurist kiritgan nuqta: radius ichida — avtomatik tasdiqlanadi; tashqarida — «Shubhali» emas,
+        # Manager'ga ogohlantirish (qaysi nuqta to'g'riligini u hal qiladi)
+        dist, in_radius = distance_m(cust.lat, cust.lng, data.lat, data.lng), None
+        if dist <= radius:
+            cust.location_status = LocationStatus.confirmed
+            legal_check, note = "confirmed", f"shartnomadagi koordinata tasdiqlandi: {dist} m"
+        else:
+            legal_check, note = "mismatch", f"shartnomadagi koordinata mos kelmadi: {dist} m"
     else:
         # Koordinata tasdiqlanmagan: radius tekshirilmaydi. Birinchi tashrif nuqtasi Manager tasdiqiga yuboriladi.
         dist = in_radius = None
         if cust.location_status == LocationStatus.none:
-            cust.lat, cust.lng, cust.location_status = data.lat, data.lng, LocationStatus.pending
+            cust.lat, cust.lng, cust.location_status, cust.location_source = data.lat, data.lng, LocationStatus.pending, "driver"
             first_visit = True
             note = "birinchi tashrif: koordinata Manager tasdiqini kutmoqda"
     act = Act(request_id=req.id, containers=data.containers, volume_m3=data.volume_m3, note=data.note.strip(),
@@ -158,6 +168,16 @@ async def complete(db: AsyncSession, driver: User, request_id: int, data: Comple
                       f"Shubhali dalolatnoma: {req.number} «{cust.name}» — korxonadan {dist} m uzoqda yopildi (radius {radius} m)",
                       params={"number": req.number, "customer": cust.name, "distance": dist, "radius": radius, "driver": driver.full_name},
                       district_id=req.district_id, actor_id=driver.id, ref=("request", req.id))
+    elif legal_check == "mismatch":
+        situation.add(db, SituationLevel.warning, "location_mismatch",
+                      f"Koordinata mos kelmadi: «{cust.name}» ({cust.fixed_no}) — shartnomadagi nuqtadan {dist} m (radius {radius} m), "
+                      f"tashrif {req.number}. Tasdiqlang yoki tuzating",
+                      params={"customer": cust.name, "fixed_no": cust.fixed_no, "number": req.number, "distance": dist, "radius": radius},
+                      district_id=req.district_id, actor_id=driver.id, ref=("customer", cust.id))
+    elif legal_check == "confirmed":
+        situation.activity(db, "act_location_confirmed", f"Shartnomadagi koordinata haydovchi tashrifida tasdiqlandi: «{cust.name}» ({dist} m)",
+                           params={"customer": cust.name, "fixed_no": cust.fixed_no, "number": req.number, "distance": dist},
+                           district_id=req.district_id, actor_id=driver.id, ref=("customer", cust.id))
     elif first_visit:
         situation.add(db, SituationLevel.info, "location_pending",
                       f"Koordinata tasdiqni kutmoqda: «{cust.name}» ({cust.fixed_no}) — birinchi tashrif {req.number}",

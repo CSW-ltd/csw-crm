@@ -151,7 +151,7 @@ async def confirm_location(db: AsyncSession, customer_id: int, body: LocationCon
         cust.lat, cust.lng = body.lat, body.lng
     elif cust.lat is None or cust.lng is None:
         raise conflict("no_location", "Tasdiqlash uchun koordinata yo'q — birinchi tashrifni kuting yoki qo'lda kiriting")
-    cust.location_status = LocationStatus.confirmed
+    cust.location_status, cust.location_source = LocationStatus.confirmed, "manager"
     _event(db, actor, "customer_updated", cust, f"Manager koordinatani tasdiqladi: {cust.fixed_no} «{cust.name}» — {cust.lat:.6f}, {cust.lng:.6f}",
            {"changes": f"{cust.lat:.6f}, {cust.lng:.6f}"})
     await situation.commit(db)
