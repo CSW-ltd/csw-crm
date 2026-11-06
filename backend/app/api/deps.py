@@ -3,6 +3,7 @@ from collections.abc import Callable
 from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.errors import AppError, forbidden
 from app.core.security import ACCESS, decode_token
 from app.db.session import get_session
@@ -31,7 +32,7 @@ async def current_user(request: Request, db: AsyncSession = DB) -> User:
     if not data:
         raise AppError(401, "not_authenticated", "Tizimga kiring")
     user = await users_repo.by_id(db, int(data["sub"]))
-    if not user or not user.is_active:
+    if not user or not user.is_active or not get_settings().role_active(user.role.value):
         raise AppError(401, "not_authenticated", "Tizimga kiring")
     # Vaqtinchalik parol bilan faqat /auth/* (me, parol almashtirish, chiqish) ishlaydi
     if user.must_change_password and not request.url.path.startswith("/api/v1/auth/"):

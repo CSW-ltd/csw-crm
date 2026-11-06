@@ -1147,6 +1147,7 @@ export const MESSAGES = {
   ce_ev_deleted: ["o‘chirildi", "удалён", "deleted"],
   k_contract_deleted: ["Shartnoma o‘chirildi", "Договор удалён", "Contract deleted"],
   err_reason_required: ["O‘chirish sababini yozing (kamida 5 belgi)", "Укажите причину (мин. 5 символов)", "Enter a reason (min. 5 characters)"],
+  err_role_inactive: ["Bu rol hozircha faol emas — tizimga kirish keyingi bosqichda ochiladi", "Эта роль пока не активна — доступ откроется на следующем этапе", "This role is not active yet — access opens in a later phase"],
   // backend xato kodlari
   err_bad_metric: ["Noto'g'ri ko'rsatkich", "Неверный показатель", "Invalid metric"],
   err_network: ["Server bilan aloqa yo'q", "Нет связи с сервером", "Cannot reach the server"],

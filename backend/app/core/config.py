@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     minio_secret_key: str = "minio-secret"
     minio_bucket: str = "csw-files"
     minio_secure: bool = False
+    minio_region: str | None = None  # UzCloud S3: "default"; MinIO uchun bo'sh
+
+    # Faol rollar (vergul bilan, masalan "admin,manager,legal,accountant"). Bo'sh — hammasi faol. Admin har doim faol.
+    active_roles: str = ""
+    app_version: str = "dev"  # CI rasmga commit SHA yozadi (/api/v1/health'da ko'rinadi)
 
     @property
     def cors_list(self) -> list[str]:
@@ -55,6 +60,40 @@ class Settings(BaseSettings):
         if os.getenv("RENDER_EXTERNAL_URL"):
             origins.append(os.environ["RENDER_EXTERNAL_URL"].rstrip("/"))
         return origins
+
+    def role_active(self, role: str) -> bool:
+        if role == "admin" or not self.active_roles.strip():
+            return True
+        return role in {r.strip() for r in self.active_roles.split(",") if r.strip()}
+
+    @property
+    def active_role_list(self) -> list[str] | None:
+        """None — cheklov yo'q (hamma rollar faol)."""
+        if not self.active_roles.strip():
+            return None
+        return sorted({"admin", *(r.strip() for r in self.active_roles.split(",") if r.strip())})
+
+    def check_production(self) -> None:
+        """Prod'da xavfli standart sozlamalar bilan ishga tushmaslik."""
+        if self.app_env != "production":
+            return
+        problems = []
+        if self.jwt_secret in ("dev-only-secret-change-me", "change-me-long-random-string") or len(self.jwt_secret) < 32:
+            problems.append("JWT_SECRET standart yoki 32 belgidan qisqa")
+        if not self.cookie_secure:
+            problems.append("COOKIE_SECURE=true bo'lishi kerak")
+        if self.tab_sessions:
+            problems.append("TAB_SESSIONS prod'da o'chiq bo'lishi kerak")
+        if self.storage_backend == "memory":
+            problems.append("STORAGE_BACKEND=memory prod'da taqiqlangan")
+        if self.database_url.startswith("sqlite"):
+            problems.append("DATABASE_URL prod'da SQLite bo'lmasligi kerak")
+        from app.models.enums import Role
+        unknown = {r.strip() for r in self.active_roles.split(",") if r.strip()} - {r.value for r in Role}
+        if unknown:
+            problems.append(f"ACTIVE_ROLES'da noma'lum rol: {', '.join(sorted(unknown))}")
+        if problems:
+            raise RuntimeError("Prod sozlamalari xato: " + "; ".join(problems))
 
 
 def public_url() -> str:

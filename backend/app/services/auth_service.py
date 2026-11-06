@@ -38,6 +38,8 @@ async def login(db: AsyncSession, username: str, password: str) -> User:
     user.failed_logins = 0
     user.locked_until = None
     await db.commit()
+    if not s.role_active(user.role.value):
+        raise AppError(403, "role_inactive", "Bu rol hozircha faol emas — tizimga kirish keyingi bosqichda ochiladi")
     return user
 
 

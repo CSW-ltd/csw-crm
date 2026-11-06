@@ -15,7 +15,8 @@ class MinioStorage:
         from minio import Minio
 
         self.bucket = s.minio_bucket
-        self.client = Minio(s.minio_endpoint, access_key=s.minio_access_key, secret_key=s.minio_secret_key, secure=s.minio_secure)
+        self.client = Minio(s.minio_endpoint, access_key=s.minio_access_key, secret_key=s.minio_secret_key,
+                            secure=s.minio_secure, region=s.minio_region or None)
         self._ready = False
 
     def _ensure_bucket(self) -> None:

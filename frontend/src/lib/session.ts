@@ -7,19 +7,22 @@
 const KEY = "csw:tab-tokens";
 let tabMode = false;
 let demo = false;
+let activeRoles: string[] | null = null;
 
 export interface Tokens { access_token: string; refresh_token: string }
 
 export async function detectSessionMode(): Promise<void> {
   try {
     const r = await fetch("/api/v1/auth/config", { credentials: "include" });
-    if (r.ok) { const c = await r.json(); tabMode = !!c.tab_sessions; demo = !!c.demo; }
+    if (r.ok) { const c = await r.json(); tabMode = !!c.tab_sessions; demo = !!c.demo; activeRoles = c.active_roles ?? null; }
   } catch { tabMode = false; }
 }
 
 export const isTabMode = () => tabMode;
 /** Demo server: login sahifasida demo hisoblar ko'rsatiladi. */
 export const isDemo = () => demo;
+/** ACTIVE_ROLES: yangi xodim formasida faqat faol rollar. null — hammasi faol. */
+export const isRoleActive = (role: string) => activeRoles === null || activeRoles.includes(role);
 
 export function getTokens(): Tokens | null {
   if (!tabMode) return null;

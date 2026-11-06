@@ -4,14 +4,17 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import socketio
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.v1 import accounting, admin, auth, callcenter, contracts, customers, driver, gps, integrations, orders, situation, tariffs
 from app.core.config import get_settings
 from app.core.errors import AppError, app_error_handler
+from app.db.session import get_session
 from app.middleware import CsrfHeaderMiddleware, RequestContextMiddleware
 from app.realtime import sio
 from app.services.storage import MemoryStorage, MinioStorage
@@ -52,6 +55,7 @@ async def _overdue_watch() -> None:
 
 def create_app(storage=None) -> FastAPI:
     s = get_settings()
+    s.check_production()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -75,6 +79,16 @@ def create_app(storage=None) -> FastAPI:
     @app.get("/api/health", tags=["system"])
     async def health():
         return {"status": "ok"}
+
+    @app.get("/api/v1/health", tags=["system"])
+    async def health_v1(db: AsyncSession = Depends(get_session)):
+        """Deploy va monitoring uchun: ilova + baza. Baza javob bermasa 503."""
+        try:
+            await db.execute(text("SELECT 1"))
+        except Exception:  # noqa: BLE001
+            log.exception("health: database unavailable")
+            return JSONResponse({"status": "error", "db": "down", "version": s.app_version}, status_code=503)
+        return {"status": "ok", "db": "ok", "version": s.app_version}
 
     if s.static_dir:
         _mount_spa(app, Path(s.static_dir))
