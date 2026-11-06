@@ -1147,6 +1147,10 @@ export const MESSAGES = {
   ce_ev_deleted: ["o‘chirildi", "удалён", "deleted"],
   k_contract_deleted: ["Shartnoma o‘chirildi", "Договор удалён", "Contract deleted"],
   err_reason_required: ["O‘chirish sababini yozing (kamida 5 belgi)", "Укажите причину (мин. 5 символов)", "Enter a reason (min. 5 characters)"],
+  inv_price_contract: ["shartnoma narxi", "цена договора", "contract price"],
+  inv_price_contract_hint: ["Mavjud shartnoma — muddati tugaguncha shartnomadagi narx bo'yicha hisoblanadi (ta'rif emas)",
+    "Действующий договор — до окончания срока расчёт по цене договора (не по тарифу)",
+    "Existing contract — billed at the contract price (not the tariff) until it expires"],
   // backend xato kodlari
   err_bad_metric: ["Noto'g'ri ko'rsatkich", "Неверный показатель", "Invalid metric"],
   err_network: ["Server bilan aloqa yo'q", "Нет связи с сервером", "Cannot reach the server"],

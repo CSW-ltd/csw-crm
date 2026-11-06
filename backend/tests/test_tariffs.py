@@ -299,3 +299,50 @@ async def test_delete_unfinished_with_reason_archives_and_warns(world, client_fa
     c2 = (await legal.get("/api/v1/contracts", params={"q": "XATO-1"})).json()["items"][0]
     await legal.post(f"/api/v1/contracts/{c2['id']}/scan-upload", files={"file": ("a.pdf", b"%PDF-1", "application/pdf")})
     assert (await legal.post(f"/api/v1/contracts/{c2['id']}/delete", json={"reason": "Sinov uchun o'chirish"})).status_code == 409
+
+
+# --- 3-bosqich: mavjud shartnoma muddati tugaguncha eski (shartnomadagi) narxda ---
+
+async def _billing_case(world, client_factory, sessionmaker, *, price, source, valid_to=None):
+    """Kub shartnoma (2 varaqa: 40 kun oldin 5 m³, 10 kun oldin 3 m³); ta'rif: viloyat 60 000 (100 kun oldin), tuman 70 000 (20 kun oldin)."""
+    from sqlalchemy import update
+    from app.models import Contract
+    cid = await _setup(world, sessionmaker, price=price)
+    async with sessionmaker() as s_:
+        vals = {"source": source} | ({"valid_to": valid_to} if valid_to else {})
+        await s_.execute(update(Contract).where(Contract.customer_id == cid).values(**vals))
+        await s_.commit()
+    admin, acc = await client_factory("admin"), await client_factory("buxgalter")
+    ra, _ = await _region_ids(sessionmaker, world)
+    await admin.post("/api/v1/tariffs", json={"region_id": ra, "price": 60000, "valid_from": str(T - timedelta(days=100))})
+    await admin.post("/api/v1/tariffs", json={"district_id": world["districts"]["a"], "price": 70000, "valid_from": str(T - timedelta(days=20))})
+    row = next(r for r in (await acc.get("/api/v1/accounting/companies")).json()["items"] if r["customer_id"] == cid)
+    forms = []
+    for d in (40, 10):
+        month = (T - timedelta(days=d)).replace(day=1)
+        f = (await acc.get("/api/v1/accounting/order-forms", params={"month": str(month)})).json()
+        forms += [x for x in f["items"] if x["customer_id"] == cid and x not in forms]
+    return row, sorted(forms, key=lambda x: x["day"])
+
+
+async def test_existing_contract_billed_at_contract_price(world, client_factory, sessionmaker):
+    row, forms = await _billing_case(world, client_factory, sessionmaker, price=50_000, source="manual")
+    assert row["debit"] == 8 * 50_000  # ta'rif (60/70 000) emas — shartnomadagi eski narx
+    assert [(x["price"], x["price_source"]) for x in forms] == [(50_000, "contract"), (50_000, "contract")]
+
+
+async def test_existing_contract_price_equal_to_tariff_stays_after_tariff_rise(world, client_factory, sessionmaker):
+    row, forms = await _billing_case(world, client_factory, sessionmaker, price=60_000, source="import")
+    assert row["debit"] == 8 * 60_000  # ta'rif 70 000 ga oshgan, lekin shartnoma narxi qotgan
+
+
+async def test_existing_contract_after_expiry_uses_tariff(world, client_factory, sessionmaker):
+    row, forms = await _billing_case(world, client_factory, sessionmaker, price=50_000, source="manual", valid_to=T - timedelta(days=20))
+    assert row["debit"] == 5 * 50_000 + 3 * 70_000  # 10 kun oldingi varaqa — muddatdan keyin, ta'rif bo'yicha
+    assert [(x["price"], x["price_source"]) for x in forms] == [(50_000, "contract"), (70_000, "tariff")]
+
+
+async def test_flow_contract_still_uses_tariff(world, client_factory, sessionmaker):
+    row, forms = await _billing_case(world, client_factory, sessionmaker, price=50_000, source="flow")
+    assert row["debit"] == 5 * 60_000 + 3 * 70_000
+    assert {x["price_source"] for x in forms} == {"tariff"}

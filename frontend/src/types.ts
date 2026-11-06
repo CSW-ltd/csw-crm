@@ -332,7 +332,8 @@ export interface PaymentItem { id: number; customer_id: number; customer_name: s
 /** Buxgalteriya: oy ichida yashil bo'lgan buyurtma varaqasi (summa — amaldagi shartnoma bo'yicha) */
 export interface MonthForm { request_id: number; number: string; day: string; customer_id: number; customer_name: string; code: string | null;
   district_id: number; form_number: string | null; volume_m3: number; waste_kind: string | null; plate: string | null; closed_via: string | null;
-  contract: string | null; contract_type: ContractType | null; price: number | null; amount: number; pending?: boolean }
+  contract: string | null; contract_type: ContractType | null; price: number | null; amount: number; pending?: boolean;
+  price_source?: "tariff" | "contract" | null }
 export interface MonthFormCustomer { customer_id: number; name: string; code: string | null; district_id: number; forms: number; total: number;
   pending?: number; usage?: { contract: string; annual: number; used: number; pct: number; level: "ok" | "warn" | "over" } | null }
 export interface InvoiceItem { id: number; number: string; customer_id: number; customer_name: string | null; code: string | null; district_id: number | null;
