@@ -5,7 +5,7 @@ name: csw-app
 
 services:
   api:
-    image: ghcr.io/uzsaltmine-dev/csw-crm-api:${IMAGE_TAG:?IMAGE_TAG kerak — deploy.sh orqali ishga tushiring}
+    image: ${IMAGE_REPO:-ghcr.io/csw-ltd}/csw-crm-api:${IMAGE_TAG:?IMAGE_TAG kerak — deploy.sh orqali ishga tushiring}
     restart: unless-stopped
     env_file: .env
     environment:
@@ -20,7 +20,7 @@ services:
       options: { max-size: "20m", max-file: "5" }
 
   web:
-    image: ghcr.io/uzsaltmine-dev/csw-crm-web:${IMAGE_TAG}
+    image: ${IMAGE_REPO:-ghcr.io/csw-ltd}/csw-crm-web:${IMAGE_TAG}
     restart: unless-stopped
     depends_on: [api]
     networks: [internal]

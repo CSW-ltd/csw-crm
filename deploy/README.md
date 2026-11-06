@@ -14,7 +14,7 @@ csw-db: backup.sh (har tun) ──▶ /var/backups/csw (7 kun) + S3 csw-backups 
 
 Filiallar: `dev` (test) → `prod` (production) → `master` (oxirgi barqaror versiya).
 
-1. `dev`ga push → GitHub Actions testlar + `ghcr.io/uzsaltmine-dev/csw-crm-{api,web}:<to'liq SHA>` rasmlari.
+1. `dev`ga push → GitHub Actions testlar + `ghcr.io/csw-ltd/csw-crm-{api,web}:<to'liq SHA>` rasmlari.
 2. **Test:** `cd /opt/csw/deploy/test && ../deploy.sh $(git rev-parse origin/dev)` → https://test.csw.uz da sinov.
 3. **Prod:** `dev` → `prod` fast-forward (`git push origin dev:prod`) — SHA o'zgarmaydi. Migratsiyali reliz bo'lsa avval
    csw-db'da `sudo systemctl start csw-backup` → keyin `cd /opt/csw/deploy/app && ../deploy.sh <o'sha SHA>`.
@@ -25,7 +25,8 @@ Filiallar: `dev` (test) → `prod` (production) → `master` (oxirgi barqaror ve
 `deploy.sh` rasmni tortadi, `up -d` qiladi va `/api/v1/health` ni kutadi; o'tmasa oldingi tag'ga avtomatik qaytaradi.
 Joriy versiya: `cat .image-tag` yoki `curl https://crm.csw.uz/api/v1/health`.
 
-> Birinchi push'dan keyin GitHub → Packages → `csw-crm-api` va `csw-crm-web` → Package settings → **Change visibility → Public**
+> Rasmlar repo egasi nomida (`CSW-ltd` → `ghcr.io/csw-ltd/...`); boshqa registry kerak bo'lsa `.env`da `IMAGE_REPO=...`.
+> Birinchi push'dan keyin GitHub (CSW-ltd tashkiloti) → Packages → `csw-crm-api` va `csw-crm-web` → Package settings → **Change visibility → Public**
 > (serverlar token'siz tortishi uchun). Rasmda sir yo'q — sirlar faqat serverdagi `.env`da.
 
 ## 1. csw-db
