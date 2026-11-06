@@ -1,0 +1,63 @@
+# csw-app: yagona ochiq IP. edge nginx (80/443, TLS) → web (SPA + /api proksi) → api.
+# test.csw.uz → csw-test'ning ichki IP'si (TEST_UPSTREAM). Baza — csw-db (DB_HOST), fayllar — UzCloud S3.
+# Ishga tushirish: deploy/README.md. Rasm versiyasi: ../deploy.sh <sha>
+name: csw-app
+
+services:
+  api:
+    image: ghcr.io/uzsaltmine-dev/csw-crm-api:${IMAGE_TAG:?IMAGE_TAG kerak — deploy.sh orqali ishga tushiring}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ENV: production
+      APP_VERSION: ${IMAGE_TAG}
+      DATABASE_URL: mysql+aiomysql://${MYSQL_USER}:${MYSQL_PASSWORD}@${DB_HOST}:3306/${MYSQL_DATABASE}
+      STORAGE_BACKEND: minio
+      TZ: Asia/Tashkent
+    networks: [internal]
+    logging: &logging
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  web:
+    image: ghcr.io/uzsaltmine-dev/csw-crm-web:${IMAGE_TAG}
+    restart: unless-stopped
+    depends_on: [api]
+    networks: [internal]
+    logging: *logging
+
+  edge:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on: [web]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      PROD_DOMAIN: ${PROD_DOMAIN:-crm.csw.uz}
+      TEST_DOMAIN: ${TEST_DOMAIN:-test.csw.uz}
+      TEST_UPSTREAM: ${TEST_UPSTREAM:?TEST_UPSTREAM kerak (csw-test ichki IP:port)}
+    volumes:
+      - ./nginx/templates:/etc/nginx/templates:ro
+      - certs:/etc/letsencrypt:ro
+      - acme:/var/www/certbot:ro
+    # Yangilangan sertifikatlarni olish uchun har 6 soatda nginx -s reload
+    command: ["/bin/sh", "-c", "while :; do sleep 6h; nginx -s reload; done & exec /docker-entrypoint.sh nginx -g 'daemon off;'"]
+    networks: [internal]
+    logging: *logging
+
+  certbot:
+    image: certbot/certbot:v3.0.1
+    restart: unless-stopped
+    volumes:
+      - certs:/etc/letsencrypt
+      - acme:/var/www/certbot
+    entrypoint: ["/bin/sh", "-c", "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"]
+    logging: *logging
+
+networks:
+  internal:
+
+volumes:
+  certs:
+  acme:

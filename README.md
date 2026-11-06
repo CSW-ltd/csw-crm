@@ -106,10 +106,12 @@ app/realtime.py     Socket.IO xonalari: managers, gps:{tuman}, driver:{id}
 
 API'ni Postman bilan sinash: `Authorization: Bearer <token>` sarlavhasi bilan CSRF tekshiruvi talab qilinmaydi; brauzer cookie bilan ishlaganda `X-Requested-With: csw` sarlavhasi shart.
 
-## Prod (VPS) uchun eslatma
+## Prod (UzCloud) — deploy
 
-- Tashqi Nginx: SSL (Let's Encrypt) va `proxy_pass http://127.0.0.1:8080`; `.env` da `COOKIE_SECURE=true`.
-- UFW: faqat 22, 80, 443 ochiq; MySQL, MinIO va API portlari `127.0.0.1` ga bog'langan.
+- To'liq qo'llanma: [`deploy/README.md`](deploy/README.md) — csw-app (edge nginx + TLS), csw-db (MySQL + tungi shifrlangan zaxira), csw-test.
+- Reliz: `main`ga merge → GitHub Actions rasmlarni GHCR'ga chiqaradi → serverda `deploy/deploy.sh <sha>` (avval test, keyin prod).
+- `GET /api/v1/health` — ilova + baza holati va versiya (SHA).
+- `ACTIVE_ROLES` — faol rollar (1-bosqich: admin, manager, legal, accountant); `python -m app.bootstrap <yaml>` — boshlang'ich xodimlar.
 - Planshetda GPS va kamera faqat **HTTPS** orqali ishlaydi.
 
 ## Huquqlar (PR #7)

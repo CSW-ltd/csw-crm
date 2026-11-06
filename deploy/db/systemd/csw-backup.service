@@ -1,0 +1,11 @@
+# /etc/systemd/system/csw-backup.service — deploy/README.md'ga qarang
+[Unit]
+Description=CSW CRM: MySQL zaxirasi (age + S3)
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/opt/csw/deploy/db/backup.sh
+Nice=10
+IOSchedulingClass=idle
