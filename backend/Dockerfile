@@ -8,6 +8,8 @@ COPY Pipfile Pipfile.lock ./
 RUN pipenv install --system --deploy
 
 COPY . .
+ARG APP_VERSION=dev
+ENV APP_VERSION=${APP_VERSION}
 RUN useradd --create-home app && chown -R app /app
 USER app
 

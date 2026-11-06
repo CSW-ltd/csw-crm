@@ -20,3 +20,11 @@ dist/
 .vscode/
 .DS_Store
 *.tsbuildinfo
+
+# deploy: server sirlari va holat fayllari
+deploy/**/.env
+deploy/**/backup.env
+deploy/**/.image-tag*
+deploy/**/bootstrap.yaml
+*.age
+key.txt

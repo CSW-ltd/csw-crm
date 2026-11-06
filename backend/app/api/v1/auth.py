@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DB, current_user
 from app.core.config import get_settings
+from app.core.demo import accounts as demo_accounts
 from app.core.errors import AppError
 from app.core.security import ACCESS, REFRESH, create_token, decode_token
 from app.models import User
@@ -40,9 +41,11 @@ def _issue(request: Request, response: Response, user: User) -> LoginOut:
 
 @router.get("/config")
 async def auth_config() -> dict:
-    """Frontend uchun: tab sessiyalari yoqilganmi va demo rejimimi (login sahifasida demo loginlar)."""
+    """Frontend uchun: tab sessiyalari, demo rejimi va faol rollar (None — hammasi faol)."""
     s = get_settings()
-    return {"tab_sessions": s.tab_sessions, "demo": s.app_env == "demo"}
+    demo = s.app_env == "demo"
+    return {"tab_sessions": s.tab_sessions, "demo": demo, "active_roles": s.active_role_list,
+            "demo_accounts": demo_accounts() if demo else []}
 
 
 @router.post("/login", response_model=LoginOut)
@@ -56,7 +59,7 @@ async def refresh(request: Request, response: Response, body: RefreshIn | None =
     token = body.refresh_token if body and body.refresh_token and _tab_mode(request) else request.cookies.get("refresh_token")
     data = decode_token(token, REFRESH) if token else None
     user = await users_repo.by_id(db, int(data["sub"])) if data else None
-    if not user or not user.is_active:
+    if not user or not user.is_active or not get_settings().role_active(user.role.value):
         raise AppError(401, "not_authenticated", "Sessiya tugadi, qayta kiring")
     return _issue(request, response, user)
 

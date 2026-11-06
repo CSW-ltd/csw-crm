@@ -8,6 +8,7 @@ import { useCan } from "@/hooks/useCan";
 import { useI18n } from "@/i18n/I18nContext";
 import type { MessageKey } from "@/i18n/messages";
 import { confirmDialog, toast } from "@/lib/alerts";
+import { isRoleActive } from "@/lib/session";
 import { useAppSelector } from "@/store";
 import type { AdminUser, Role } from "@/types";
 import { AccessDialog } from "./AccessDialog";
@@ -26,6 +27,8 @@ export function UsersTab({ districts }: RefData) {
   const me = useAppSelector((s) => s.auth.user);
   const isAdmin = me?.role === "admin";
   const roles = isAdmin ? ALL_ROLES : STAFF_ROLES;
+  const formRoles = roles.filter(isRoleActive); // yangi xodim — faqat faol rollar (ACTIVE_ROLES)
+  const newRole: Role = isAdmin ? "driver" : "gps";
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [role, setRole] = useState<Role | "">("");
   const [district, setDistrict] = useState<number | "">("");
@@ -89,7 +92,7 @@ export function UsersTab({ districts }: RefData) {
           {districts.map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
         </TextField>
         {can("staff.create") && <Button variant="contained" sx={{ whiteSpace: "nowrap" }}
-          onClick={() => setForm({ ...EMPTY, role: isAdmin ? "driver" : "gps" })}>{t("new_user")}</Button>}
+          onClick={() => setForm({ ...EMPTY, role: formRoles.includes(newRole) ? newRole : formRoles[0] })}>{t("new_user")}</Button>}
       </Stack>
       <TableContainer>
         <Table size="small">
@@ -144,7 +147,7 @@ export function UsersTab({ districts }: RefData) {
             <TextField id="f-phone" label={t("phone")} value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} placeholder="+998 90 123-45-67" />
             <TextField id="f-role" select label={t("role")} value={form.role} disabled={form.id === me?.id}
               onChange={(e) => setForm({ ...form, role: e.target.value as Role, district_id: "", district_ids: [] })}>
-              {(roles.includes(form.role) ? roles : [...roles, form.role]).map((r) => <MenuItem key={r} value={r}>{roleLabel(r)}</MenuItem>)}
+              {(formRoles.includes(form.role) ? formRoles : [...formRoles, form.role]).map((r) => <MenuItem key={r} value={r}>{roleLabel(r)}</MenuItem>)}
             </TextField>
             {single && <TextField id="f-district" select label={t("district")} value={form.district_id} required
               onChange={(e) => setForm({ ...form, district_id: Number(e.target.value) })}>

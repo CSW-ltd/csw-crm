@@ -41,32 +41,20 @@ Monorepo:
 - "Shu sessiyadagi xabarlar": ekranda chiqqan barcha popuplar (forma xatolari ham), sahifa yangilanguncha.
 - O'qilganlik har bir xodim uchun alohida.
 
-## Jonli demo (Render, bepul)
-
-`render.yaml` + `Dockerfile.demo`: bitta konteynerda frontend va backend, SQLite, fayllar xotirada.
-Har push'da avtomatik qayta deploy bo'ladi; har qayta ishga tushishda baza boshlang'ich holatga qaytadi.
-
-1. https://render.com → **GitHub bilan kirish** (karta shart emas)
-2. **New → Blueprint** → `uzsaltmine-dev/csw-crm` → **Apply**
-3. Havola: `https://csw-crm-demo.onrender.com` (yoki Render bergan nom)
-
-Demo loginlar (parol `demo1234`): GPS xodimi `gps4`, haydovchi `driver41` (ikkalasi Asaka tumani), `admin`, `manager`, yurist `legal`.
-Tavsiya: GPS xodimini kompyuterda, haydovchini telefon/planshetda oching.
-Demo serverda (`TAB_SESSIONS=true`) bitta brauzerning har tabida boshqa rolda kirish mumkin; tab sarlavhasida rol va ism turadi.
-Yangi tab ochib manzilni qo'lda kiriting (tabni "Dublikat" qilsangiz, sessiya ham nusxalanadi). Prod'da bu rejim o'chiq — httpOnly cookie.
-
-Bepul reja cheklovlari: 15 daqiqa kirilmasa uxlaydi, keyingi ochilish ~1 daqiqa.
-Namuna korxonalar Asakada joylashgan — boshqa joydan yakunlangan ariza haqli ravishda `Shubhali` (radiusdan tashqarida) bo'ladi.
-
 ## Lokal ishga tushirish (Docker)
 
 ```bash
-cp .env.example .env          # parollarni almashtiring
+cp .env.example .env          # parollarni va DEMO_CREDENTIALS'ni almashtiring
 docker compose up -d --build
-docker compose exec api python -m app.seed   # boshlang'ich ma'lumotlar, parol: SEED_PASSWORD yoki ChangeMe123!
+docker compose exec api python -m app.seed               # bo'sh bazaga demo ma'lumot
+docker compose exec api python -m app.seed --reset --yes # hammasini o'chirib, qayta yaratish
 ```
 
-- Frontend: http://localhost:8080 — haydovchi `driver41` (Asaka tumani), GPS xodimi `gps4`
+- Demo loginlar (har rolga bitta): `csw.admin`, `csw.manager`, `csw.yurist`, `csw.buxgalter`, `csw.operator`,
+  `csw.gps` va `csw.haydovchi` (ikkalasi Asaka tumani). Parollar faqat `.env` dagi `DEMO_CREDENTIALS` (JSON) da.
+  `APP_ENV=demo` bo'lsa login sahifasida shu loginlar chip sifatida ko'rinadi (parolsiz).
+- Seed `APP_ENV=production` da ishlamaydi — prod uchun `python -m app.bootstrap` ([`deploy/README.md`](deploy/README.md)).
+- Frontend: http://localhost:8080
 - API hujjati (Swagger): http://localhost:8000/docs
 - MinIO konsoli: http://localhost:9001
 - MySQL (DBeaver): `localhost:3306`, `.env` dagi foydalanuvchi
@@ -78,6 +66,7 @@ docker compose exec api python -m app.seed   # boshlang'ich ma'lumotlar, parol: 
 cd backend
 pipenv install --dev
 export DATABASE_URL=sqlite+aiosqlite:///./dev.db STORAGE_BACKEND=memory   # MySQL/MinIO'siz tezkor variant
+export DEMO_CREDENTIALS='{"csw.admin":"...", ...}'   # .env.example'dagi namuna
 pipenv run alembic upgrade head && pipenv run python -m app.seed
 pipenv run uvicorn app.main:asgi_app --reload
 
@@ -106,10 +95,12 @@ app/realtime.py     Socket.IO xonalari: managers, gps:{tuman}, driver:{id}
 
 API'ni Postman bilan sinash: `Authorization: Bearer <token>` sarlavhasi bilan CSRF tekshiruvi talab qilinmaydi; brauzer cookie bilan ishlaganda `X-Requested-With: csw` sarlavhasi shart.
 
-## Prod (VPS) uchun eslatma
+## Prod (UzCloud) — deploy
 
-- Tashqi Nginx: SSL (Let's Encrypt) va `proxy_pass http://127.0.0.1:8080`; `.env` da `COOKIE_SECURE=true`.
-- UFW: faqat 22, 80, 443 ochiq; MySQL, MinIO va API portlari `127.0.0.1` ga bog'langan.
+- To'liq qo'llanma: [`deploy/README.md`](deploy/README.md) — csw-app (edge nginx + TLS), csw-db (MySQL + tungi shifrlangan zaxira), csw-test.
+- Reliz: `main`ga merge → GitHub Actions rasmlarni GHCR'ga chiqaradi → serverda `deploy/deploy.sh <sha>` (avval test, keyin prod).
+- `GET /api/v1/health` — ilova + baza holati va versiya (SHA).
+- `ACTIVE_ROLES` — faol rollar (1-bosqich: admin, manager, legal, accountant); `python -m app.bootstrap <yaml>` — boshlang'ich xodimlar.
 - Planshetda GPS va kamera faqat **HTTPS** orqali ishlaydi.
 
 ## Huquqlar (PR #7)
@@ -210,7 +201,7 @@ Batafsil kelishuvlar: `docs/plans/three-stage-flow.md`.
   (`SF-YYYY-MM-#####`). Reys/kub — har varaqa alohida qator; oylik shartnoma — bitta qator (oylik summa) + varaqalar summasiz ilova.
   Narxlar QQS bilan, PDF'da «shu jumladan QQS 12%» (`VAT_RATE`, standart 12) va summa so'z bilan.
 - «Hammasiga jo'natish» — har korxona telefoniga SMS: summa va PDF havolasi (`/api/v1/public/invoices/{token}`, login'siz,
-  32 baytli tasodifiy token, faqat yuborilgan faktura). Havola bazasi: `PUBLIC_BASE_URL` (bo'lmasa `RENDER_EXTERNAL_URL`).
+  32 baytli tasodifiy token, faqat yuborilgan faktura). Havola bazasi: `PUBLIC_BASE_URL`.
   Yuborilgan faktura qulflanadi: qayta yaratish unga tegmaydi; yuborilmaganlari qayta hisoblanadi (raqam saqlanadi).
 - Debitor/kreditor va faktura bitta hisob manbasidan (`billing.Ledger`) foydalanadi.
 - **Admin → Sozlamalar → Rekvizitlar**: har viloyat xizmat ko'rsatuvchisining to'liq nomi, STIR, manzil, bank, MFO, hisob raqam,

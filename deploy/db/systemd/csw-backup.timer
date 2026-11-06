@@ -1,0 +1,11 @@
+# /etc/systemd/system/csw-backup.timer — har kuni 02:30 (Asia/Tashkent)
+[Unit]
+Description=CSW CRM: tungi zaxira
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 Asia/Tashkent
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target

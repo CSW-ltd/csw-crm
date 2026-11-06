@@ -1,0 +1,31 @@
+# python -m app.bootstrap uchun namuna — FAQAT SUN'IY MA'LUMOT.
+# Haqiqiy fayl serverda saqlanadi (repoga qo'shilmaydi). Ishga tushirish (csw-app):
+#   docker compose exec -T api python -m app.bootstrap /dev/stdin < bootstrap.yaml
+# Mavjud viloyat/provider/tuman/login o'zgartirilmaydi — qayta ishga tushirish xavfsiz.
+# Rollar: admin, manager, legal, accountant, operator, gps, driver.
+#   manager/legal/operator/accountant — districts: [...] (bir nechta tuman)
+#   gps/driver — district: ... (aynan bitta tuman)
+
+regions:
+  - name: Namuna viloyati
+    provider: { name: Namuna Eko, code: NME }   # rekvizitlar keyin admin «Sozlamalar»da
+    districts:
+      - Birinchi tumani
+      - Ikkinchi tumani
+
+users:
+  - username: bosh.admin
+    full_name: Bosh administrator
+    role: admin
+  - username: menejer.namuna
+    full_name: Namuna Menejer
+    role: manager
+    districts: [Birinchi tumani, Ikkinchi tumani]
+  - username: yurist.namuna
+    full_name: Namuna Yurist
+    role: legal
+    districts: [Birinchi tumani]
+  - username: buxgalter.namuna
+    full_name: Namuna Buxgalter
+    role: accountant
+    districts: [Birinchi tumani, Ikkinchi tumani]

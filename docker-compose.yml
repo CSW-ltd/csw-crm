@@ -22,7 +22,9 @@ services:
       retries: 10
 
   minio:
-    image: cgr.dev/chainguard/minio:latest   # minio/minio Docker Hub'dan 11.09.2026 da olib tashlangan
+    # minio/minio Docker Hub'dan 11.09.2026 da olib tashlangan. Digest bilan qotirilgan;
+    # yangilash: docker buildx imagetools inspect cgr.dev/chainguard/minio:latest
+    image: cgr.dev/chainguard/minio@sha256:aea6c163749e1caca37f907976dcf337177ddf5f558808f2aa591618fd3a6eef
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
