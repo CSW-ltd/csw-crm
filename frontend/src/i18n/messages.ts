@@ -129,7 +129,7 @@ export const MESSAGES = {
   auth_step_2: ["Birinchi kirishda o'zingizning parolingizni o'rnatasiz", "При первом входе вы задаёте свой пароль", "On first sign-in you set your own password"],
   auth_step_3: ["Tizim rolingizga mos ish panelini o'zi ochadi", "Система сама откроет панель для вашей роли", "The system opens the panel for your role"],
   login_subtitle: ["Ish panelingizga kirish uchun login va parolni kiriting", "Введите логин и пароль, чтобы открыть свою панель", "Enter your username and password to open your panel"],
-  username_help: ["Masalan: driver41", "Например: driver41", "For example: driver41"],
+  username_help: ["Masalan: ism.familiya", "Например: imya.familiya", "For example: name.surname"],
   field_required: ["To'ldiring", "Заполните поле", "Required"],
   caps_lock_on: ["Caps Lock yoqilgan", "Включён Caps Lock", "Caps Lock is on"],
   signing_in: ["Kirilmoqda…", "Вход…", "Signing in…"],

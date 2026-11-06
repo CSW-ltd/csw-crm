@@ -8,14 +8,10 @@ import { useI18n } from "@/i18n/I18nContext";
 import type { MessageKey } from "@/i18n/messages";
 import { afterLoginPath } from "@/lib/routes";
 import { lastPath } from "@/hooks/usePersisted";
-import { isDemo, isTabMode } from "@/lib/session";
+import { getDemoAccounts, isDemo, isTabMode } from "@/lib/session";
 import { useAppDispatch, useAppSelector } from "@/store";
 import { login } from "@/store/authSlice";
 
-const DEMO_ACCOUNTS: { username: string; role: MessageKey }[] = [
-  { username: "admin", role: "r_admin" }, { username: "manager", role: "r_manager" }, { username: "legal", role: "r_legal" }, { username: "buxgalter", role: "r_accountant" },
-  { username: "operator", role: "r_operator" }, { username: "gps4", role: "r_gps" }, { username: "driver41", role: "r_driver" },
-];
 
 export function LoginPage() {
   const { t, tErr } = useI18n();
@@ -61,14 +57,14 @@ export function LoginPage() {
           <Typography variant="body2" color="text.secondary">{t("forgot_password_hint")}</Typography>
         </Stack>
 
-        {isDemo() && <Box sx={{ mt: 4, pt: 3, borderTop: 1, borderColor: "divider" }}>
+        {isDemo() && getDemoAccounts().length > 0 && <Box sx={{ mt: 4, pt: 3, borderTop: 1, borderColor: "divider" }}>
           <Typography variant="body2" fontWeight={600}>{t("demo_accounts")}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 1.5 }}>
             {t(isTabMode() ? "demo_accounts_hint_tabs" : "demo_accounts_hint")}
           </Typography>
           <Stack direction="row" useFlexGap flexWrap="wrap" gap={1}>
-            {DEMO_ACCOUNTS.map((a) => (
-              <Chip key={a.username} variant="outlined" clickable label={`${t(a.role)}: ${a.username}`}
+            {getDemoAccounts().map((a) => (
+              <Chip key={a.username} variant="outlined" clickable label={`${t(`r_${a.role}` as MessageKey)}: ${a.username}`}
                 onClick={() => { setUsername(a.username); setPassword(""); setTouched(false); }} />
             ))}
           </Stack>

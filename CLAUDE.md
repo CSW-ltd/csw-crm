@@ -37,7 +37,7 @@ Bu fayl Claude Code uchun: har sessiya boshida o'qiladi. Repo **ochiq (public)**
 # lokal (Docker): mysql, minio, api, web
 cp .env.example .env            # bir marta, parollarni almashtiring
 docker compose up -d --build
-docker compose exec -e SEED_PASSWORD='...' api python -m app.seed   # bo'sh bazaga bir marta
+docker compose exec api python -m app.seed   # demo ma'lumot; loginlar/parollar .env DEMO_CREDENTIALS (JSON); --reset --yes — qayta yaratish
 docker compose logs api --tail 50
 # ilova: http://localhost:8080   API hujjati: http://localhost:8000/docs
 

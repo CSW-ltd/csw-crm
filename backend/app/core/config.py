@@ -49,7 +49,9 @@ class Settings(BaseSettings):
 
     # Faol rollar (vergul bilan, masalan "admin,manager,legal,accountant"). Bo'sh — hammasi faol. Admin har doim faol.
     active_roles: str = ""
-    app_version: str = "dev"  # CI rasmga commit SHA yozadi (/api/v1/health'da ko'rinadi)
+    app_version: str = "dev"
+    # Demo loginlari (APP_ENV=demo va lokal seed): JSON {"csw.admin": "parol", ...} — app/core/demo.py
+    demo_credentials: str = ""  # CI rasmga commit SHA yozadi (/api/v1/health'da ko'rinadi)
 
     @property
     def cors_list(self) -> list[str]:
@@ -68,7 +70,14 @@ class Settings(BaseSettings):
         return sorted({"admin", *(r.strip() for r in self.active_roles.split(",") if r.strip())})
 
     def check_production(self) -> None:
-        """Prod'da xavfli standart sozlamalar bilan ishga tushmaslik."""
+        """Prod'da xavfli standart sozlamalar bilan ishga tushmaslik; demo'da — DEMO_CREDENTIALS to'g'ri bo'lishi."""
+        if self.app_env == "demo":
+            from app.core.demo import DemoCredentialsError, parse
+            try:
+                parse(self.demo_credentials)
+            except DemoCredentialsError as e:
+                raise RuntimeError(f"Demo sozlamalari xato: {e}") from None
+            return
         if self.app_env != "production":
             return
         problems = []

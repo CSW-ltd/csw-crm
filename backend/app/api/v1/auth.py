@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DB, current_user
 from app.core.config import get_settings
+from app.core.demo import accounts as demo_accounts
 from app.core.errors import AppError
 from app.core.security import ACCESS, REFRESH, create_token, decode_token
 from app.models import User
@@ -42,7 +43,9 @@ def _issue(request: Request, response: Response, user: User) -> LoginOut:
 async def auth_config() -> dict:
     """Frontend uchun: tab sessiyalari, demo rejimi va faol rollar (None — hammasi faol)."""
     s = get_settings()
-    return {"tab_sessions": s.tab_sessions, "demo": s.app_env == "demo", "active_roles": s.active_role_list}
+    demo = s.app_env == "demo"
+    return {"tab_sessions": s.tab_sessions, "demo": demo, "active_roles": s.active_role_list,
+            "demo_accounts": demo_accounts() if demo else []}
 
 
 @router.post("/login", response_model=LoginOut)

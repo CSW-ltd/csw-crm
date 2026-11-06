@@ -93,8 +93,11 @@ cd /opt/csw/deploy/test
 cp .env.example .env && chmod 600 .env          # prod'dan boshqa parollar va JWT_SECRET
 sudo ufw allow from <csw-app ichki IP> to any port 8080 proto tcp
 ../deploy.sh <sha>
-docker compose exec -T api python -m app.bootstrap /dev/stdin < bootstrap.yaml   # yoki: python -m app.seed (demo)
+docker compose exec api python -m app.seed --reset --yes   # demo: 7 ta csw.* login, parollar .env DEMO_CREDENTIALS'da
 ```
+
+Demo rejim (`APP_ENV=demo`): login sahifasida demo loginlar chip sifatida (parolsiz), har brauzer tabida boshqa rol (`TAB_SESSIONS=true`).
+Parollarni almashtirish: `.env` dagi `DEMO_CREDENTIALS` → `../deploy.sh $(cat .image-tag)` → `seed --reset --yes`.
 
 Test serverga haqiqiy ma'lumot yuklanmaydi.
 

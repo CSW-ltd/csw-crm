@@ -44,12 +44,17 @@ Monorepo:
 ## Lokal ishga tushirish (Docker)
 
 ```bash
-cp .env.example .env          # parollarni almashtiring
+cp .env.example .env          # parollarni va DEMO_CREDENTIALS'ni almashtiring
 docker compose up -d --build
-docker compose exec api python -m app.seed   # boshlang'ich ma'lumotlar, parol: SEED_PASSWORD yoki ChangeMe123!
+docker compose exec api python -m app.seed               # bo'sh bazaga demo ma'lumot
+docker compose exec api python -m app.seed --reset --yes # hammasini o'chirib, qayta yaratish
 ```
 
-- Frontend: http://localhost:8080 — haydovchi `driver41` (Asaka tumani), GPS xodimi `gps4`
+- Demo loginlar (har rolga bitta): `csw.admin`, `csw.manager`, `csw.yurist`, `csw.buxgalter`, `csw.operator`,
+  `csw.gps` va `csw.haydovchi` (ikkalasi Asaka tumani). Parollar faqat `.env` dagi `DEMO_CREDENTIALS` (JSON) da.
+  `APP_ENV=demo` bo'lsa login sahifasida shu loginlar chip sifatida ko'rinadi (parolsiz).
+- Seed `APP_ENV=production` da ishlamaydi — prod uchun `python -m app.bootstrap` ([`deploy/README.md`](deploy/README.md)).
+- Frontend: http://localhost:8080
 - API hujjati (Swagger): http://localhost:8000/docs
 - MinIO konsoli: http://localhost:9001
 - MySQL (DBeaver): `localhost:3306`, `.env` dagi foydalanuvchi
@@ -61,6 +66,7 @@ docker compose exec api python -m app.seed   # boshlang'ich ma'lumotlar, parol: 
 cd backend
 pipenv install --dev
 export DATABASE_URL=sqlite+aiosqlite:///./dev.db STORAGE_BACKEND=memory   # MySQL/MinIO'siz tezkor variant
+export DEMO_CREDENTIALS='{"csw.admin":"...", ...}'   # .env.example'dagi namuna
 pipenv run alembic upgrade head && pipenv run python -m app.seed
 pipenv run uvicorn app.main:asgi_app --reload
 
