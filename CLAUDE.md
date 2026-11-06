@@ -16,8 +16,8 @@ Bu fayl Claude Code uchun: har sessiya boshida o'qiladi. Repo **ochiq (public)**
 - Haqiqiy call-center Excel fayli (shaxsiy ma'lumot) va haqiqiy shartnoma namunalari (korxona/shaxs nomlari, STIR, hisob raqamlari) **hech qachon commit qilinmaydi** va repo papkasida saqlanmaydi. Testlar va namunalar — faqat sun'iy ma'lumot (`docs/samples/`).
 - PR tavsiflarida haqiqiy ma'lumot bo'yicha faqat umumiy sonlar (agregat) yoziladi.
 - Shartnoma shablonlarida faqat placeholder va demo rekvizitlar.
-- Ochiq demo (Render) ga haqiqiy ma'lumot yuklanmaydi.
-- Demo parollari faqat Render secret env `DEMO_CREDENTIALS` da — kodda, README'da, i18n'da emas.
+- Test/demo server (test.csw.uz) ga haqiqiy ma'lumot yuklanmaydi.
+- Demo parollari faqat test serverning `.env` idagi `DEMO_CREDENTIALS` da — kodda, README'da, i18n'da emas.
 - Maxfiy SSH kalit va parollar so'ralmaydi va ulashilmaydi; `.env` commit qilinmaydi.
 
 ## Kechiktirilgan ishlar — boshlanmaydi
@@ -28,7 +28,7 @@ Bu fayl Claude Code uchun: har sessiya boshida o'qiladi. Repo **ochiq (public)**
 
 | Qism | Texnologiya |
 |---|---|
-| backend/ | Python 3.12, FastAPI, SQLAlchemy 2 (async) + Alembic, MySQL 8.4 (prod/lokal), SQLite (testlar, demo), python-socketio, pydantic v2, MinIO/S3 |
+| backend/ | Python 3.12, FastAPI, SQLAlchemy 2 (async) + Alembic, MySQL 8.4 (prod/lokal), SQLite (testlar), python-socketio, pydantic v2, MinIO/S3 |
 | frontend/ | React 18 + TypeScript (Vite), MUI v6, Redux Toolkit, Axios, Socket.IO-client |
 
 ## Buyruqlar

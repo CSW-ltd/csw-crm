@@ -41,23 +41,6 @@ Monorepo:
 - "Shu sessiyadagi xabarlar": ekranda chiqqan barcha popuplar (forma xatolari ham), sahifa yangilanguncha.
 - O'qilganlik har bir xodim uchun alohida.
 
-## Jonli demo (Render, bepul)
-
-`render.yaml` + `Dockerfile.demo`: bitta konteynerda frontend va backend, SQLite, fayllar xotirada.
-Har push'da avtomatik qayta deploy bo'ladi; har qayta ishga tushishda baza boshlang'ich holatga qaytadi.
-
-1. https://render.com → **GitHub bilan kirish** (karta shart emas)
-2. **New → Blueprint** → `uzsaltmine-dev/csw-crm` → **Apply**
-3. Havola: `https://csw-crm-demo.onrender.com` (yoki Render bergan nom)
-
-Demo loginlar (parol `demo1234`): GPS xodimi `gps4`, haydovchi `driver41` (ikkalasi Asaka tumani), `admin`, `manager`, yurist `legal`.
-Tavsiya: GPS xodimini kompyuterda, haydovchini telefon/planshetda oching.
-Demo serverda (`TAB_SESSIONS=true`) bitta brauzerning har tabida boshqa rolda kirish mumkin; tab sarlavhasida rol va ism turadi.
-Yangi tab ochib manzilni qo'lda kiriting (tabni "Dublikat" qilsangiz, sessiya ham nusxalanadi). Prod'da bu rejim o'chiq — httpOnly cookie.
-
-Bepul reja cheklovlari: 15 daqiqa kirilmasa uxlaydi, keyingi ochilish ~1 daqiqa.
-Namuna korxonalar Asakada joylashgan — boshqa joydan yakunlangan ariza haqli ravishda `Shubhali` (radiusdan tashqarida) bo'ladi.
-
 ## Lokal ishga tushirish (Docker)
 
 ```bash
@@ -212,7 +195,7 @@ Batafsil kelishuvlar: `docs/plans/three-stage-flow.md`.
   (`SF-YYYY-MM-#####`). Reys/kub — har varaqa alohida qator; oylik shartnoma — bitta qator (oylik summa) + varaqalar summasiz ilova.
   Narxlar QQS bilan, PDF'da «shu jumladan QQS 12%» (`VAT_RATE`, standart 12) va summa so'z bilan.
 - «Hammasiga jo'natish» — har korxona telefoniga SMS: summa va PDF havolasi (`/api/v1/public/invoices/{token}`, login'siz,
-  32 baytli tasodifiy token, faqat yuborilgan faktura). Havola bazasi: `PUBLIC_BASE_URL` (bo'lmasa `RENDER_EXTERNAL_URL`).
+  32 baytli tasodifiy token, faqat yuborilgan faktura). Havola bazasi: `PUBLIC_BASE_URL`.
   Yuborilgan faktura qulflanadi: qayta yaratish unga tegmaydi; yuborilmaganlari qayta hisoblanadi (raqam saqlanadi).
 - Debitor/kreditor va faktura bitta hisob manbasidan (`billing.Ledger`) foydalanadi.
 - **Admin → Sozlamalar → Rekvizitlar**: har viloyat xizmat ko'rsatuvchisining to'liq nomi, STIR, manzil, bank, MFO, hisob raqam,

@@ -69,7 +69,7 @@ export function LoginPage() {
           <Stack direction="row" useFlexGap flexWrap="wrap" gap={1}>
             {DEMO_ACCOUNTS.map((a) => (
               <Chip key={a.username} variant="outlined" clickable label={`${t(a.role)}: ${a.username}`}
-                onClick={() => { setUsername(a.username); setPassword("demo1234"); setTouched(false); }} />
+                onClick={() => { setUsername(a.username); setPassword(""); setTouched(false); }} />
             ))}
           </Stack>
         </Box>}

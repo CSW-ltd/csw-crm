@@ -1,4 +1,3 @@
-import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -36,11 +35,10 @@ class Settings(BaseSettings):
     eskiz_password: str = ""
     sms_sender: str = "4546"
 
-    # SMS havolalari uchun tashqi manzil (masalan https://crm.example.uz); bo'sh bo'lsa RENDER_EXTERNAL_URL
+    # SMS havolalari uchun tashqi manzil (masalan https://crm.csw.uz)
     public_base_url: str = ""
     vat_rate: float = 12.0  # QQS, %: narx QQS bilan (fakturada "shu jumladan")
 
-    static_dir: str | None = None  # demo: frontend build'i shu papkadan beriladi (bitta konteyner)
     storage_backend: str = "minio"  # "memory" — MinIO'siz lokal ishlab chiqish uchun (fayllar xotirada)
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "minio"
@@ -55,11 +53,7 @@ class Settings(BaseSettings):
 
     @property
     def cors_list(self) -> list[str]:
-        origins = [o.strip() for o in self.cors_origins.split(",") if o.strip()]
-        # Render har bir servis (va PR preview) uchun o'z URL'ini beradi — Socket.IO Origin tekshiruvi uchun
-        if os.getenv("RENDER_EXTERNAL_URL"):
-            origins.append(os.environ["RENDER_EXTERNAL_URL"].rstrip("/"))
-        return origins
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     def role_active(self, role: str) -> bool:
         if role == "admin" or not self.active_roles.strip():
@@ -98,7 +92,7 @@ class Settings(BaseSettings):
 
 def public_url() -> str:
     s = get_settings()
-    return (s.public_base_url or os.getenv("RENDER_EXTERNAL_URL", "") or "http://localhost:8000").rstrip("/")
+    return (s.public_base_url or "http://localhost:8000").rstrip("/")
 
 
 @lru_cache

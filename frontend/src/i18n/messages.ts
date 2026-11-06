@@ -107,7 +107,6 @@ export const MESSAGES = {
     "No drivers on shift — open a shift and let the driver start it"],
   no_new_requests: ["Yangi murojaat yo'q", "Новых заявок нет", "No new requests"],
   created: ["Yaratildi", "Создана", "Created"],
-  demo_hint: ["Demo: haydovchi — driver41, GPS xodimi — gps4 (Asaka tumani). Parol: demo1234", "Демо: водитель — driver41, GPS — gps4 (Асака). Пароль: demo1234", "Demo: driver — driver41, GPS dispatcher — gps4 (Asaka). Password: demo1234"],
 
   // parol almashtirish
   change_pw_title: ["Parolni almashtiring", "Смените пароль", "Change your password"],
@@ -138,10 +137,10 @@ export const MESSAGES = {
     "Забыли пароль? Обратитесь к администратору — он выдаст новый временный пароль.",
     "Forgot your password? Ask your administrator for a new temporary one."],
   demo_accounts: ["Demo hisoblar", "Демо-аккаунты", "Demo accounts"],
-  demo_accounts_hint: ["Bosing — login va parol (demo1234) to'ldiriladi", "Нажмите — логин и пароль (demo1234) заполнятся", "Click to fill username and password (demo1234)"],
-  demo_accounts_hint_tabs: ["Bosing — login va parol (demo1234) to'ldiriladi. Har brauzer tabida boshqa rolda kirishingiz mumkin.",
-    "Нажмите — логин и пароль (demo1234) заполнятся. В каждой вкладке можно войти под другой ролью.",
-    "Click to fill username and password (demo1234). Each browser tab can use a different role."],
+  demo_accounts_hint: ["Bosing — login to'ldiriladi, parolni kiriting", "Нажмите — логин заполнится, введите пароль", "Click to fill the username, then enter the password"],
+  demo_accounts_hint_tabs: ["Bosing — login to'ldiriladi, parolni kiriting. Har brauzer tabida boshqa rolda kirishingiz mumkin.",
+    "Нажмите — логин заполнится, введите пароль. В каждой вкладке можно войти под другой ролью.",
+    "Click to fill the username, then enter the password. Each browser tab can use a different role."],
   language: ["Til", "Язык", "Language"],
   change_pw_hello: ["{name}, vaqtinchalik parol bilan kirdingiz. Davom etish uchun o'zingizning parolingizni o'rnating.",
     "{name}, вы вошли с временным паролем. Задайте свой пароль, чтобы продолжить.",
