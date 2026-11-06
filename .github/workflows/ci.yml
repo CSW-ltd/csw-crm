@@ -1,18 +1,18 @@
-# PR: backend testlari + frontend typecheck/build.
-# main'ga merge: yuqoridagilar + api va web rasmlari GHCR'ga (tag = commit SHA). Deploy — serverda qo'lda: deploy/deploy.sh <sha>
+# Har push (dev, prod, master): backend testlari + frontend typecheck/build.
+# dev: + api va web rasmlari GHCR'ga (tag = commit SHA). Rasm faqat bir marta yig'iladi: dev → prod fast-forward,
+# shuning uchun prod'ga aynan testda sinalgan rasm chiqadi. Deploy — serverda qo'lda: deploy/deploy.sh <sha>
 name: ci
 
 on:
-  pull_request:
   push:
-    branches: [main]
+    branches: [dev, prod, master]
 
 permissions:
   contents: read
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 jobs:
   backend:
@@ -45,7 +45,7 @@ jobs:
       - run: yarn build
 
   images:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/dev'
     needs: [backend, frontend]
     runs-on: ubuntu-24.04
     permissions:
@@ -74,7 +74,7 @@ jobs:
             APP_VERSION=${{ github.sha }}
           tags: |
             ghcr.io/uzsaltmine-dev/csw-crm-${{ matrix.name }}:${{ github.sha }}
-            ghcr.io/uzsaltmine-dev/csw-crm-${{ matrix.name }}:main
+            ghcr.io/uzsaltmine-dev/csw-crm-${{ matrix.name }}:dev
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}

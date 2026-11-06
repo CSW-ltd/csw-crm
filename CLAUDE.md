@@ -8,13 +8,24 @@ Bu fayl Claude Code uchun: har sessiya boshida o'qiladi. Repo **ochiq (public)**
 - Muloqot **o'zbek tilida (lotin)**.
 - **Har o'zgarishdan oldin reja ko'rsatiladi va tasdiq olinadi** («ha», «boshlaymanmi» va h.k.). Tasdiqsiz kod yozilmaydi, commit/push qilinmaydi.
 - Noaniq joylar **grill uslubida** so'raladi: qisqa variantli savollar, tavsiya etilgan variant birinchi va «(Tavsiya)» belgisi bilan.
-- Har PR'dan keyin **«Nimani sinash kerak»** ro'yxati beriladi — chatda ham, PR tavsifida ham (raqamlangan, tekshirib bo'ladigan qadamlar).
-- Ish filiallarda: `feature/...` yoki `fix/...`, PR → `main`. `main`ga to'g'ridan-to'g'ri push qilinmaydi.
+- Har ishdan keyin **«Nimani sinash kerak»** ro'yxati chatda beriladi (raqamlangan, tekshirib bo'ladigan qadamlar).
+
+## Filiallar (2026-11-06 dan) — faqat uchta, PR yo'q
+
+| Filial | Vazifasi | Kim/qachon yangilaydi |
+|---|---|---|
+| `dev` | kundalik ish, test.csw.uz | Claude — reja tasdiqlangach, to'g'ridan push |
+| `prod` | production, crm.csw.uz | foydalanuvchi «prod'ga chiqar» deganda: `dev` → `prod` **faqat fast-forward** (aynan testda sinalgan commit va rasm) |
+| `master` | oxirgi barqaror versiya (tiklash nuqtasi) | foydalanuvchi «barqaror» deganda: `prod` → `master` fast-forward |
+
+- Boshqa filial ochilmaydi. `prod` va `master`ga force-push va o'chirish taqiqlangan (GitHub himoyasi).
+- Jiddiy muammo: `prod` `master` holatiga qaytariladi (yangi commit bilan, force-push'siz) → `deploy.sh` bilan qayta chiqariladi; baza kerak bo'lsa `restore.sh`.
+- Commit xabarlarida haqiqiy ma'lumot bo'yicha faqat umumiy sonlar (agregat) yoziladi.
 
 ## Maxfiylik qoidalari (buzilmaydi)
 
 - Haqiqiy call-center Excel fayli (shaxsiy ma'lumot) va haqiqiy shartnoma namunalari (korxona/shaxs nomlari, STIR, hisob raqamlari) **hech qachon commit qilinmaydi** va repo papkasida saqlanmaydi. Testlar va namunalar — faqat sun'iy ma'lumot (`docs/samples/`).
-- PR tavsiflarida haqiqiy ma'lumot bo'yicha faqat umumiy sonlar (agregat) yoziladi.
+- Commit xabarlari va hisobotlarda haqiqiy ma'lumot bo'yicha faqat umumiy sonlar (agregat) yoziladi.
 - Shartnoma shablonlarida faqat placeholder va demo rekvizitlar.
 - Test/demo server (test.csw.uz) ga haqiqiy ma'lumot yuklanmaydi.
 - Demo parollari faqat test serverning `.env` idagi `DEMO_CREDENTIALS` da — kodda, README'da, i18n'da emas.
@@ -66,17 +77,15 @@ Muhim: testlar SQLite'da ishlaydi — MySQL'ga xos xatolar ko'rinmaydi. Baza/dra
 ## Infratuzilma (umumiy)
 
 - Prod: UzCloud (Toshkent), domen `crm.csw.uz` (sotib olinmoqda), test: `test.csw.uz`.
-- Deploy: GitHub Actions `main`ga merge'da rasmlarni GHCR'ga chiqaradi (public, tag = commit SHA); serverda qo'lda `deploy/deploy.sh <sha>` — avval test, keyin aynan o'sha rasm prod'ga. Actions'da SSH kalit yo'q.
+- Deploy: GitHub Actions `dev` push'ida rasmlarni GHCR'ga chiqaradi (prod'da qayta yig'ilmaydi) (public, tag = commit SHA); serverda qo'lda `deploy/deploy.sh <sha>` — avval test, keyin aynan o'sha rasm prod'ga. Actions'da SSH kalit yo'q.
 - 3 server bitta VPC'da: **csw-app** (nginx + api + web, yagona ochiq IP), **csw-db** (MySQL, faqat app tarmog'idan), **csw-test** (ochiq IP'siz; test.csw.uz csw-app nginx orqali proksi qilinadi; prod bazaga ulana olmaydi). Hammasida Ubuntu 24.04, faqat kalit bilan SSH, ufw, fail2ban, Docker.
 - Fayllar: UzCloud S3 (endpoint `s3.uzcstorage.uz`, region `default`). Lokal ishlab chiqishda MinIO (`cgr.dev/chainguard/minio` — `minio/minio` Docker Hub'dan olib tashlangan).
 - IP manzillar, kirish buyruqlari va to'lov tafsilotlari — repoda emas, foydalanuvchining shaxsiy hujjatlarida.
 
 ## Ish tartibi (2026-11-06 da kelishilgan)
 
-1. **Prod'ga tayyorlik PR'i** (`feature/prod-readiness`): `deploy/app`, `deploy/db`, `deploy/test` compose fayllari; GHCR + Actions; `deploy.sh`; `ACTIVE_ROLES` (1-bosqichda faqat admin, manager, legal, buxgalter faol); `python -m app.bootstrap` (YAML'dan boshlang'ich foydalanuvchilar, tasodifiy vaqtinchalik parol); birinchi kirishda parolni majburiy almashtirish; `/api/v1/health`; S3 region sozlamasi; nginx (crm.csw.uz va test.csw.uz → csw-test); `age` bilan shifrlangan tungi zaxira S3 `csw-backups` ga + csw-db'da 7 kunlik lokal nusxa; `restore.sh`; MinIO rasmini digest bo'yicha qotirish.
-2. **Render demo'ni to'liq olib tashlash:** `render.yaml`, `Dockerfile.demo`, `docker/demo-start.sh`, `RENDER_EXTERNAL_URL` va boshqa izlar; Render dashboard'dagi servisni foydalanuvchi o'chiradi.
-3. **Billing tuzatish:** mavjud shartnomalar eski narxda (yuqoridagi qaror).
-4. **Demo loginlari PR'i (faqat test.csw.uz):** har rolga bitta foydalanuvchi (csw.admin, csw.manager, csw.yurist, csw.buxgalter, csw.operator, csw.gps, csw.haydovchi — Asaka); parollar faqat test serverdagi `DEMO_CREDENTIALS` env'dan; umumiy parol koddan va README'dan olib tashlanadi; ro'yxatda yo'q foydalanuvchilar seed'da o'chiriladi.
-5. **Prod'ga chiqish** va tuman xodimlariga tarqatish. Keyin — OCR, yuz tanish, STIR.
+1–4 bajarildi va `dev`da: prod'ga tayyorlik (deploy/, GHCR, `ACTIVE_ROLES`, `app.bootstrap`, health, age zaxira), Render demo olib tashlandi,
+billing (mavjud shartnoma eski narxda), demo loginlari (`DEMO_CREDENTIALS`, 7 ta `csw.*`, `seed --reset --yes`).
+5. **Prod'ga chiqish** (`dev` → `prod`) va tuman xodimlariga tarqatish. Keyin — OCR, yuz tanish, STIR.
 
 - Keyinroq: bitta STIR ostida bosh korxona guruhlash; xaritadagi takror nuqtalar tekshiruvi; maktab/bog'chalar (hududiy boshqarma orqali); printer agenti; haydovchilar uchun Telegram bot; o'z GPS monitoringi; jismoniy abonentlar; 1C o'rniga o'z buxgalteriyasi; Didox/Soliq e-faktura; qo'shimcha kelishuvlar; edo.ijro.uz muqobili — ichki hujjat aylanishi.

@@ -12,11 +12,15 @@ csw-db: backup.sh (har tun) ──▶ /var/backups/csw (7 kun) + S3 csw-backups 
 
 ## Reliz oqimi
 
-1. PR `main`ga merge bo'ladi → GitHub Actions testlar + `ghcr.io/uzsaltmine-dev/csw-crm-{api,web}:<to'liq SHA>` rasmlari.
-2. **Test:** `cd /opt/csw/deploy/test && ../deploy.sh <sha>` → https://test.csw.uz da sinov.
-3. **Prod:** migratsiyali reliz bo'lsa avval csw-db'da `sudo systemctl start csw-backup` → keyin
-   `cd /opt/csw/deploy/app && ../deploy.sh <sha>` (aynan testda sinalgan SHA).
-4. Muammo bo'lsa: `../deploy.sh --rollback` (faqat rasm qaytadi; migratsiya qaytmaydi — kerak bo'lsa `restore.sh`).
+Filiallar: `dev` (test) → `prod` (production) → `master` (oxirgi barqaror versiya).
+
+1. `dev`ga push → GitHub Actions testlar + `ghcr.io/uzsaltmine-dev/csw-crm-{api,web}:<to'liq SHA>` rasmlari.
+2. **Test:** `cd /opt/csw/deploy/test && ../deploy.sh $(git rev-parse origin/dev)` → https://test.csw.uz da sinov.
+3. **Prod:** `dev` → `prod` fast-forward (`git push origin dev:prod`) — SHA o'zgarmaydi. Migratsiyali reliz bo'lsa avval
+   csw-db'da `sudo systemctl start csw-backup` → keyin `cd /opt/csw/deploy/app && ../deploy.sh <o'sha SHA>`.
+4. Bir necha kun muammosiz ishlasa: `prod` → `master` (`git push origin prod:master`) — tiklash nuqtasi.
+5. Muammo bo'lsa: tezkor — `../deploy.sh --rollback` (faqat rasm; migratsiya qaytmaydi — kerak bo'lsa `restore.sh`);
+   jiddiy — `prod` kodini `master` holatiga qaytarish (revert commit) va `../deploy.sh $(git rev-parse origin/master)`.
 
 `deploy.sh` rasmni tortadi, `up -d` qiladi va `/api/v1/health` ni kutadi; o'tmasa oldingi tag'ga avtomatik qaytaradi.
 Joriy versiya: `cat .image-tag` yoki `curl https://crm.csw.uz/api/v1/health`.
