@@ -22,7 +22,7 @@ Bu fayl Claude Code uchun: har sessiya boshida o'qiladi. Repo **ochiq (public)**
 
 ## Kechiktirilgan ishlar — boshlanmaydi
 
-**OCR, yuz tanish (face recognition) va STIR orqali firma ma'lumotlarini aniqlash** — foydalanuvchi **«to'liq tugadi»** degan so'zni yubormaguncha boshlanmaydi. Undan keyin uchalasi ketma-ket bitta reja sifatida bajariladi.
+**OCR, yuz tanish (face recognition) va STIR orqali firma ma'lumotlarini aniqlash** — prod'da proyekt to'liq ishlay boshlagandan keyin (5-bosqichdan so'ng) va foydalanuvchi **«to'liq tugadi»** deganidan keyin boshlanadi. Undan keyin uchalasi ketma-ket bitta reja sifatida bajariladi.
 
 ## Stek
 
@@ -61,17 +61,22 @@ Muhim: testlar SQLite'da ishlaydi — MySQL'ga xos xatolar ko'rinmaydi. Baza/dra
 
 - Shartnoma holatlari: draft → signed → approved / returned; `deleted` — arxiv (tugallanmagan shartnoma izoh bilan o'chiriladi, raqami bo'shatiladi, `archived_number`da saqlanadi).
 - `source`: flow / manual / import. Mavjud (manual/import) shartnomada qo'lda narx faqat `customers.existing_price` huquqi bilan va tarifdan farq qilsa — sabab majburiy.
-- Hisob-kitob (billing) hozircha buyurtma varaqasi yopilgan kundagi **tarif** bo'yicha, shartnomadagi qo'lda narx bo'yicha emas. **Ochiq savol:** eski narxli mavjud shartnomalar muddati tugaguncha eski narxda hisoblansinmi? — foydalanuvchi javob bermagan; bu qoidani o'zgartirishdan oldin so'rang.
+- Hisob-kitob (billing): flow shartnomalar buyurtma varaqasi yopilgan kundagi **tarif** bo'yicha. **Qaror (2026-11-06):** mavjud (manual/import) shartnomalar muddati (`valid_to`) tugaguncha shartnomadagi **eski (qo'lda) narx** bo'yicha hisoblanadi — 3-bosqich PR'ida amalga oshiriladi.
 
 ## Infratuzilma (umumiy)
 
-- Prod: UzCloud (Toshkent), domen `crm.csw.uz` (sotib olinmoqda), test: `test.crm.csw.uz`.
-- 3 server bitta VPC'da: **csw-app** (nginx + api + web, yagona ochiq IP), **csw-db** (MySQL, faqat app tarmog'idan), **csw-test** (ochiq IP'siz; test.crm csw-app nginx orqali proksi qilinadi; prod bazaga ulana olmaydi). Hammasida Ubuntu 24.04, faqat kalit bilan SSH, ufw, fail2ban, Docker.
+- Prod: UzCloud (Toshkent), domen `crm.csw.uz` (sotib olinmoqda), test: `test.csw.uz`.
+- Deploy: GitHub Actions `main`ga merge'da rasmlarni GHCR'ga chiqaradi (public, tag = commit SHA); serverda qo'lda `deploy/deploy.sh <sha>` — avval test, keyin aynan o'sha rasm prod'ga. Actions'da SSH kalit yo'q.
+- 3 server bitta VPC'da: **csw-app** (nginx + api + web, yagona ochiq IP), **csw-db** (MySQL, faqat app tarmog'idan), **csw-test** (ochiq IP'siz; test.csw.uz csw-app nginx orqali proksi qilinadi; prod bazaga ulana olmaydi). Hammasida Ubuntu 24.04, faqat kalit bilan SSH, ufw, fail2ban, Docker.
 - Fayllar: UzCloud S3 (endpoint `s3.uzcstorage.uz`, region `default`). Lokal ishlab chiqishda MinIO (`cgr.dev/chainguard/minio` — `minio/minio` Docker Hub'dan olib tashlangan).
 - IP manzillar, kirish buyruqlari va to'lov tafsilotlari — repoda emas, foydalanuvchining shaxsiy hujjatlarida.
 
-## Keyingi rejalar (tasdiq kutilmoqda)
+## Ish tartibi (2026-11-06 da kelishilgan)
 
-- **Prod'ga tayyorlik PR'i:** `deploy/app`, `deploy/db`, `deploy/test` compose fayllari; `ACTIVE_ROLES` (1-bosqichda faqat admin, manager, legal, buxgalter faol); `python -m app.bootstrap` (YAML'dan boshlang'ich foydalanuvchilar); birinchi kirishda parolni majburiy almashtirish; `/api/v1/health`; S3 region sozlamasi; nginx (crm.csw.uz va test.crm.csw.uz → csw-test); shifrlangan tungi zaxira S3 `csw-backups` ga + csw-db'da 7 kunlik lokal nusxa; `restore.sh`; MinIO rasmini digest bo'yicha qotirish.
-- **Demo loginlari PR'i:** har rolga bitta foydalanuvchi (csw.admin, csw.manager, csw.yurist, csw.buxgalter, csw.operator, csw.gps, csw.haydovchi — Asaka); parollar faqat `DEMO_CREDENTIALS` env'dan; login sahifasidagi demo chiplari, README va Dockerfile.demo'dagi umumiy parol olib tashlanadi; ro'yxatda yo'q foydalanuvchilar seed'da o'chiriladi.
+1. **Prod'ga tayyorlik PR'i** (`feature/prod-readiness`): `deploy/app`, `deploy/db`, `deploy/test` compose fayllari; GHCR + Actions; `deploy.sh`; `ACTIVE_ROLES` (1-bosqichda faqat admin, manager, legal, buxgalter faol); `python -m app.bootstrap` (YAML'dan boshlang'ich foydalanuvchilar, tasodifiy vaqtinchalik parol); birinchi kirishda parolni majburiy almashtirish; `/api/v1/health`; S3 region sozlamasi; nginx (crm.csw.uz va test.csw.uz → csw-test); `age` bilan shifrlangan tungi zaxira S3 `csw-backups` ga + csw-db'da 7 kunlik lokal nusxa; `restore.sh`; MinIO rasmini digest bo'yicha qotirish.
+2. **Render demo'ni to'liq olib tashlash:** `render.yaml`, `Dockerfile.demo`, `docker/demo-start.sh`, `RENDER_EXTERNAL_URL` va boshqa izlar; Render dashboard'dagi servisni foydalanuvchi o'chiradi.
+3. **Billing tuzatish:** mavjud shartnomalar eski narxda (yuqoridagi qaror).
+4. **Demo loginlari PR'i (faqat test.csw.uz):** har rolga bitta foydalanuvchi (csw.admin, csw.manager, csw.yurist, csw.buxgalter, csw.operator, csw.gps, csw.haydovchi — Asaka); parollar faqat test serverdagi `DEMO_CREDENTIALS` env'dan; umumiy parol koddan va README'dan olib tashlanadi; ro'yxatda yo'q foydalanuvchilar seed'da o'chiriladi.
+5. **Prod'ga chiqish** va tuman xodimlariga tarqatish. Keyin — OCR, yuz tanish, STIR.
+
 - Keyinroq: bitta STIR ostida bosh korxona guruhlash; xaritadagi takror nuqtalar tekshiruvi; maktab/bog'chalar (hududiy boshqarma orqali); printer agenti; haydovchilar uchun Telegram bot; o'z GPS monitoringi; jismoniy abonentlar; 1C o'rniga o'z buxgalteriyasi; Didox/Soliq e-faktura; qo'shimcha kelishuvlar; edo.ijro.uz muqobili — ichki hujjat aylanishi.
