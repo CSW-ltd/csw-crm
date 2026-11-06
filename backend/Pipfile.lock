@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "e46eb5e65a0b7f2bb8112c212963ea5617457e846d15a5ccf92af2c6aac20a6b"
+            "sha256": "ab86559ed49b33db3d0d4d9cba9312c27a5df7db40d97cb514b3b7f906bae57c"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -1477,11 +1477,12 @@
         },
         "pymysql": {
             "hashes": [
-                "sha256:14f1c68e2ed859243ae5ca41ffbe677027fc46bc136a9f0be8a4e928e5e7415a",
-                "sha256:d5b288529782e536ae171866df3ca9dc4f6cbfb3cc2f18e6f837fbb90dbc262b"
+                "sha256:4de15da4c61dc132f4fb9ab763063e693d521a80fd0e87943b9a453dd4c19d6c",
+                "sha256:e127611aaf2b417403c60bf4dc570124aeb4a57f5f37b8e95ae399a42f904cd0"
             ],
-            "markers": "python_version >= '3.9'",
-            "version": "==1.2.3"
+            "index": "pypi",
+            "markers": "python_version >= '3.7'",
+            "version": "==1.1.1"
         },
         "pypdfium2": {
             "hashes": [

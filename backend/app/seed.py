@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from app.core.permissions import apply_template
 from app.core.security import hash_password
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, engine
 from app.services.schedule import today as schedule_today
 from app.models import AppSetting, Contract, ContractEvent, Tariff, Customer, District, Provider, Region, OrderForm, Payment, Request, RequestEvent, User, VehiclePosition, WorkSchedule, UserDistrict, Vehicle
 from app.db.base import utcnow
@@ -172,5 +172,12 @@ async def seed() -> None:
         print("Seed tayyor: admin, manager, legal, operator, buxgalter, gps1..gps12, driver11..driver122")
 
 
+async def _main() -> None:
+    try:
+        await seed()
+    finally:
+        await engine.dispose()  # ulanishlar loop yopilishidan oldin yopiladi
+
+
 if __name__ == "__main__":
-    asyncio.run(seed())
+    asyncio.run(_main())
