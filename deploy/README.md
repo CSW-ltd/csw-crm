@@ -76,6 +76,46 @@ IMAGE_TAG=none docker compose run --rm -p 80:80 --entrypoint certbot certbot cer
 ../deploy.sh <sha>                              # api + web + edge + certbot (yangilash har 12 soatda)
 ```
 
+### DNS'gacha sinov (vaqtinchalik self-signed sertifikat)
+
+DNS hali ishlamasa certbot sertifikat ololmaydi, sertifikatsiz esa `edge` ishga tushmaydi. Vaqtincha o'z-o'zidan
+imzolangan sertifikat `certs` volume'idagi aynan o'sha yo'lga qo'yiladi — kod va konfiguratsiya o'zgarmaydi.
+
+```bash
+cd /opt/csw/deploy/app
+mkdir -p /tmp/selfsigned && cd /tmp/selfsigned
+openssl req -x509 -nodes -newkey rsa:2048 -days 30 -keyout privkey.pem -out fullchain.pem \
+  -subj "/CN=crm.csw.uz" -addext "subjectAltName=DNS:crm.csw.uz,DNS:test.csw.uz"
+cd /opt/csw/deploy/app
+IMAGE_TAG=none docker compose run --rm --no-deps -v /tmp/selfsigned:/src:ro --entrypoint sh certbot -c \
+  'mkdir -p /etc/letsencrypt/live/crm.csw.uz && cp /src/*.pem /etc/letsencrypt/live/crm.csw.uz/ && touch /etc/letsencrypt/live/crm.csw.uz/SELF-SIGNED'
+rm -rf /tmp/selfsigned
+../deploy.sh <sha>
+```
+
+O'z kompyuteringizda `/etc/hosts` ga (macOS: keyin `sudo dscacheutil -flushcache; sudo killall -HUP mDNSResponder`):
+
+```
+<csw-app ochiq IP>  crm.csw.uz test.csw.uz
+```
+
+Brauzer «xavfsiz emas» deydi — bu kutilgan holat. Shu bilan butun zanjir sinaladi: edge → web/api, csw-test proksi,
+csw-db, S3, `app.bootstrap`, zaxira va tiklash. Haqiqiy foydalanish (xodimlarga tarqatish) — faqat haqiqiy sertifikatdan keyin.
+
+**DNS ishlagach** (`dig +short crm.csw.uz` va `dig +short test.csw.uz` → csw-app IP), avval vaqtinchalik sertifikatni
+**o'chiring** — aks holda certbot `crm.csw.uz-0001` papkasini yaratadi va nginx eski sertifikatda qoladi:
+
+```bash
+cd /opt/csw/deploy/app
+docker compose stop edge                         # certbot --standalone 80-portni egallaydi
+IMAGE_TAG=none docker compose run --rm --no-deps --entrypoint sh certbot -c \
+  'test -f /etc/letsencrypt/live/crm.csw.uz/SELF-SIGNED && rm -rf /etc/letsencrypt/live/crm.csw.uz'
+# keyin yuqoridagi «Birinchi sertifikat» buyrug'i, so'ng:
+../deploy.sh $(cat .image-tag)
+```
+
+`/etc/hosts` dagi qatorni o'chirishni unutmang.
+
 **Boshlang'ich ma'lumot** (viloyat, tuman, xodimlar) — haqiqiy fayl faqat serverda:
 
 ```bash
