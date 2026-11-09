@@ -24,6 +24,8 @@ Filiallar: `dev` (test) → `prod` (production) → `master` (oxirgi barqaror ve
 
 `deploy.sh` rasmni tortadi, `up -d` qiladi va `/api/v1/health` ni kutadi; o'tmasa oldingi tag'ga avtomatik qaytaradi.
 Joriy versiya: `cat .image-tag` yoki `curl https://crm.csw.uz/api/v1/health`.
+Qo'lda compose buyruqlari (`ps`, `logs`, `exec`) — `../dc ...` orqali: u `IMAGE_TAG`ni `.image-tag`dan oladi
+(oddiy `docker compose ...` «IMAGE_TAG kerak» xatosini beradi).
 
 > Rasmlar repo egasi nomida (`CSW-ltd` → `ghcr.io/csw-ltd/...`); boshqa registry kerak bo'lsa `.env`da `IMAGE_REPO=...`.
 > Birinchi push'dan keyin GitHub (CSW-ltd tashkiloti) → Packages → `csw-crm-api` va `csw-crm-web` → Package settings → **Change visibility → Public**
@@ -107,7 +109,7 @@ csw-db, S3, `app.bootstrap`, zaxira va tiklash. Haqiqiy foydalanish (xodimlarga 
 
 ```bash
 cd /opt/csw/deploy/app
-docker compose stop edge                         # certbot --standalone 80-portni egallaydi
+../dc stop edge                                   # certbot --standalone 80-portni egallaydi
 IMAGE_TAG=none docker compose run --rm --no-deps --entrypoint sh certbot -c \
   'test -f /etc/letsencrypt/live/crm.csw.uz/SELF-SIGNED && rm -rf /etc/letsencrypt/live/crm.csw.uz'
 # keyin yuqoridagi «Birinchi sertifikat» buyrug'i, so'ng:
@@ -120,7 +122,7 @@ IMAGE_TAG=none docker compose run --rm --no-deps --entrypoint sh certbot -c \
 
 ```bash
 cp ../bootstrap.example.yaml bootstrap.yaml && chmod 600 bootstrap.yaml   # tahrirlang
-docker compose exec -T api python -m app.bootstrap /dev/stdin < bootstrap.yaml
+../dc exec -T api python -m app.bootstrap /dev/stdin < bootstrap.yaml
 ```
 
 Vaqtinchalik parollar terminalga **bir marta** chiqadi — xodimlarga xavfsiz kanal orqali bering; birinchi kirishda almashtiriladi.
@@ -138,7 +140,7 @@ cd /opt/csw/deploy/test
 cp .env.example .env && chmod 600 .env          # prod'dan boshqa parollar va JWT_SECRET
 sudo ufw allow from <csw-app ichki IP> to any port 8080 proto tcp
 ../deploy.sh <sha>
-docker compose exec api python -m app.seed --reset --yes   # demo: 7 ta csw.* login, parollar .env DEMO_CREDENTIALS'da
+../dc exec api python -m app.seed --reset --yes   # demo: 7 ta csw.* login, parollar .env DEMO_CREDENTIALS'da
 ```
 
 Demo rejim (`APP_ENV=demo`): login sahifasida demo loginlar chip sifatida (parolsiz), har brauzer tabida boshqa rol (`TAB_SESSIONS=true`).
@@ -150,4 +152,4 @@ Test serverga haqiqiy ma'lumot yuklanmaydi.
 
 - `ss -tlnp`: csw-app — faqat 22/80/443; csw-db — 3306 faqat ichki IP'da; csw-test — 8080 faqat ichki IP'da.
 - `curl -s https://crm.csw.uz/api/v1/health` → `{"status":"ok","db":"ok","version":"<sha>"}`.
-- `APP_ENV=production` da xavfsiz bo'lmagan sozlama (standart `JWT_SECRET`, `COOKIE_SECURE=false`, SQLite, ...) bo'lsa api ishga tushmaydi — `docker compose logs api`.
+- `APP_ENV=production` da xavfsiz bo'lmagan sozlama (standart `JWT_SECRET`, `COOKIE_SECURE=false`, SQLite, ...) bo'lsa api ishga tushmaydi — `../dc logs api`.

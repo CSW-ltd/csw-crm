@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# docker compose joriy rasm versiyasi bilan (IMAGE_TAG = .image-tag, deploy.sh yozadi).
+# deploy/app yoki deploy/test papkasida:  ../dc ps | ../dc logs api --tail 50 | ../dc exec api python -m app.seed ...
+set -euo pipefail
+
+[[ -f compose.yml ]] || { echo "compose.yml topilmadi — deploy/app yoki deploy/test papkasida ishga tushiring" >&2; exit 2; }
+tag=$(cat .image-tag 2>/dev/null || true)
+[[ -n "$tag" ]] || { echo ".image-tag yo'q — avval ../deploy.sh <sha> muvaffaqiyatli tugashi kerak" >&2; exit 2; }
+
+IMAGE_TAG="$tag" exec docker compose "$@"
