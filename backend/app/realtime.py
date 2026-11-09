@@ -12,6 +12,7 @@ from http.cookies import SimpleCookie
 import socketio
 
 from app.core.config import get_settings
+from app.core.portals import host_allows
 from app.core.security import ACCESS, decode_token
 
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=get_settings().cors_list)
@@ -27,6 +28,8 @@ async def connect(sid, environ, auth):
     if not data:
         return False  # ulanish rad etiladi
     role, uid = data["role"], data["sub"]
+    if not host_allows(environ.get("HTTP_HOST"), role):
+        return False  # boshqa rol portali (ROLE_HOSTS)
     await sio.enter_room(sid, f"user:{uid}")
     if role in ("admin", "manager"):
         await sio.enter_room(sid, "managers")

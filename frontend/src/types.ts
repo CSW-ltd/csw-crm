@@ -291,7 +291,7 @@ export interface CompleteResult {
 }
 
 export interface ApiErrorBody {
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; details?: Record<string, unknown> };
   detail?: unknown;
 }
 

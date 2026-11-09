@@ -1,4 +1,4 @@
-"""Demo loginlari (test.csw.uz va lokal): DEMO_CREDENTIALS env'idan, JSON — {"csw.admin": "parol", ...}.
+"""Demo loginlari (*.test.csw.uz va lokal): DEMO_CREDENTIALS env'idan, JSON — {"csw.admin": "parol", ...}.
 
 Parollar faqat serverdagi .env'da; kodda faqat login → rol bog'lanishi.
 """

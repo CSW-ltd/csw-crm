@@ -29,3 +29,5 @@ deploy/**/.image-tag*
 deploy/**/bootstrap.yaml
 *.age
 key.txt
+deploy/**/admin-allow.conf
+.history/

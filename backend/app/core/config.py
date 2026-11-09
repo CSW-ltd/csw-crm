@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     eskiz_password: str = ""
     sms_sender: str = "4546"
 
-    # SMS havolalari uchun tashqi manzil (masalan https://crm.csw.uz)
+    # Tashqi havolalar (ochiq faktura, SMS) uchun manzil (masalan https://csw.uz)
     public_base_url: str = ""
     vat_rate: float = 12.0  # QQS, %: narx QQS bilan (fakturada "shu jumladan")
 
@@ -49,6 +49,9 @@ class Settings(BaseSettings):
 
     # Faol rollar (vergul bilan, masalan "admin,manager,legal,accountant"). Bo'sh — hammasi faol. Admin har doim faol.
     active_roles: str = ""
+    # Portallar (JSON): {"manager.csw.uz": ["manager"], ...} — har rol faqat o'z subdomenida (app/core/portals.py).
+    # Bo'sh — cheklov yo'q (lokal/testlar); prod'da majburiy.
+    role_hosts: str = ""
     app_version: str = "dev"
     # Demo loginlari (APP_ENV=demo va lokal seed): JSON {"csw.admin": "parol", ...} — app/core/demo.py
     demo_credentials: str = ""  # CI rasmga commit SHA yozadi (/api/v1/health'da ko'rinadi)
@@ -71,6 +74,11 @@ class Settings(BaseSettings):
 
     def check_production(self) -> None:
         """Prod'da xavfli standart sozlamalar bilan ishga tushmaslik; demo'da — DEMO_CREDENTIALS to'g'ri bo'lishi."""
+        from app.core.portals import RoleHostsError, parse as parse_role_hosts
+        try:
+            portals = parse_role_hosts(self.role_hosts)
+        except RoleHostsError as e:
+            raise RuntimeError(f"Sozlama xato: {e}") from None
         if self.app_env == "demo":
             from app.core.demo import DemoCredentialsError, parse
             try:
@@ -95,6 +103,8 @@ class Settings(BaseSettings):
         unknown = {r.strip() for r in self.active_roles.split(",") if r.strip()} - {r.value for r in Role}
         if unknown:
             problems.append(f"ACTIVE_ROLES'da noma'lum rol: {', '.join(sorted(unknown))}")
+        if portals is None:
+            problems.append("ROLE_HOSTS bo'sh — prod'da har rol o'z subdomenida bo'lishi kerak")
         if problems:
             raise RuntimeError("Prod sozlamalari xato: " + "; ".join(problems))
 

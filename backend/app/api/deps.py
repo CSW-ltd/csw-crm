@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import AppError, forbidden
+from app.core.portals import check_portal
 from app.core.security import ACCESS, decode_token
 from app.db.session import get_session
 from app.models import User
@@ -34,6 +35,8 @@ async def current_user(request: Request, db: AsyncSession = DB) -> User:
     user = await users_repo.by_id(db, int(data["sub"]))
     if not user or not user.is_active or not get_settings().role_active(user.role.value):
         raise AppError(401, "not_authenticated", "Tizimga kiring")
+    # Har rol faqat o'z subdomenida (ROLE_HOSTS) — /auth/me va butun API shu yerdan o'tadi
+    check_portal(request.headers.get("host"), user.role.value)
     # Vaqtinchalik parol bilan faqat /auth/* (me, parol almashtirish, chiqish) ishlaydi
     if user.must_change_password and not request.url.path.startswith("/api/v1/auth/"):
         raise AppError(403, "password_change_required", "Avval parolni almashtiring")

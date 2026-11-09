@@ -18,6 +18,7 @@ import { afterLoginPath } from "@/lib/routes";
 import { lastPath } from "@/hooks/usePersisted";
 import { useAppDispatch, useAppSelector } from "@/store";
 import { loadMe, sessionExpired } from "@/store/authSlice";
+import { portalRole } from "@/lib/session";
 import { refreshDriver } from "@/store/driverSlice";
 import type { Role } from "@/types";
 
@@ -73,7 +74,10 @@ export function App() {
   // Tab sarlavhasi: qaysi rolda va kim bo'lib kirilgani — bir nechta tabda turli rollarni ajratish uchun
   const me = useAppSelector((st) => st.auth.user);
   useEffect(() => {
-    document.title = me ? `${t(`r_${me.role}` as MessageKey)} · ${me.full_name} — CSW` : `${t("login_title")} — CSW`;
+    // Portal (subdomen) nomi — kirishdan oldin ham qaysi bo'lim ekani ko'rinsin
+    const role = portalRole();
+    const portal = role ? `${t(`portal_${role}` as MessageKey)} · ` : "";
+    document.title = me ? `${t(`r_${me.role}` as MessageKey)} · ${me.full_name} — CSW` : `${portal}${t("login_title")} — CSW`;
   }, [t, me]);
 
   return (

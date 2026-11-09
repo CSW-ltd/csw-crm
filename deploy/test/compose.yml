@@ -1,5 +1,5 @@
 # csw-test: ochiq IP'siz. O'z MySQL va MinIO'si (prod bazaga ulanmaydi).
-# web faqat ichki VPC IP'da ochiladi (BIND_IP:8080) — csw-app'dagi edge nginx test.csw.uz'ni shu yerga proksi qiladi.
+# web faqat ichki VPC IP'da ochiladi (BIND_IP:8080) — csw-app'dagi edge nginx *.test.csw.uz'ni shu yerga proksi qiladi.
 # Ishga tushirish: deploy/README.md. Rasm versiyasi: ../deploy.sh <sha>
 name: csw-test
 

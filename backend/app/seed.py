@@ -1,4 +1,4 @@
-"""Demo ma'lumotlar (lokal va test.csw.uz): viloyatlar, xizmat ko'rsatuvchilar, 12 tuman, mashinalar, 7 demo foydalanuvchi, namunaviy korxonalar.
+"""Demo ma'lumotlar (lokal va *.test.csw.uz): viloyatlar, xizmat ko'rsatuvchilar, 12 tuman, mashinalar, 7 demo foydalanuvchi, namunaviy korxonalar.
 
 Ishga tushirish:  python -m app.seed               — bo'sh bazaga (to'ldirilgan bo'lsa hech narsa qilmaydi)
                   python -m app.seed --reset --yes — barcha ma'lumotni o'chirib, qayta yaratadi

@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.errors import AppError
+from app.core.portals import check_portal
 from app.core.security import hash_password, verify_password
 from app.db.base import utcnow
 from app.models import User
@@ -12,7 +13,7 @@ from app.repositories import users as users_repo
 from app.services import situation
 
 
-async def login(db: AsyncSession, username: str, password: str) -> User:
+async def login(db: AsyncSession, username: str, password: str, host: str | None = None) -> User:
     s = get_settings()
     user = await users_repo.by_username(db, username.strip().lower())
     bad = AppError(401, "invalid_credentials", "Login yoki parol noto'g'ri")
@@ -40,6 +41,8 @@ async def login(db: AsyncSession, username: str, password: str) -> User:
     await db.commit()
     if not s.role_active(user.role.value):
         raise AppError(403, "role_inactive", "Bu rol hozircha faol emas — tizimga kirish keyingi bosqichda ochiladi")
+    # Portal (subdomen) faqat parol to'g'ri bo'lgandan keyin tekshiriladi — login borligi oshkor bo'lmasin
+    check_portal(host, user.role.value)
     return user
 
 

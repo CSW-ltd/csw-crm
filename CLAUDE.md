@@ -14,8 +14,8 @@ Bu fayl Claude Code uchun: har sessiya boshida o'qiladi. Repo **ochiq (public)**
 
 | Filial | Vazifasi | Kim/qachon yangilaydi |
 |---|---|---|
-| `dev` | kundalik ish, test.csw.uz | Claude — reja tasdiqlangach, to'g'ridan push |
-| `prod` | production, crm.csw.uz | foydalanuvchi «prod'ga chiqar» deganda: `dev` → `prod` **faqat fast-forward** (aynan testda sinalgan commit va rasm) |
+| `dev` | kundalik ish, `*.test.csw.uz` | Claude — reja tasdiqlangach, to'g'ridan push |
+| `prod` | production, rol portallari `*.csw.uz` | foydalanuvchi «prod'ga chiqar» deganda: `dev` → `prod` **faqat fast-forward** (aynan testda sinalgan commit va rasm) |
 | `master` | oxirgi barqaror versiya (tiklash nuqtasi) | foydalanuvchi «barqaror» deganda: `prod` → `master` fast-forward |
 
 - Boshqa filial ochilmaydi. `prod` va `master`ga force-push va o'chirish taqiqlangan (GitHub himoyasi).
@@ -27,7 +27,7 @@ Bu fayl Claude Code uchun: har sessiya boshida o'qiladi. Repo **ochiq (public)**
 - Haqiqiy call-center Excel fayli (shaxsiy ma'lumot) va haqiqiy shartnoma namunalari (korxona/shaxs nomlari, STIR, hisob raqamlari) **hech qachon commit qilinmaydi** va repo papkasida saqlanmaydi. Testlar va namunalar — faqat sun'iy ma'lumot (`docs/samples/`).
 - Commit xabarlari va hisobotlarda haqiqiy ma'lumot bo'yicha faqat umumiy sonlar (agregat) yoziladi.
 - Shartnoma shablonlarida faqat placeholder va demo rekvizitlar.
-- Test/demo server (test.csw.uz) ga haqiqiy ma'lumot yuklanmaydi.
+- Test/demo server (`*.test.csw.uz`) ga haqiqiy ma'lumot yuklanmaydi.
 - Demo parollari faqat test serverning `.env` idagi `DEMO_CREDENTIALS` da — kodda, README'da, i18n'da emas.
 - Maxfiy SSH kalit va parollar so'ralmaydi va ulashilmaydi; `.env` commit qilinmaydi.
 
@@ -76,9 +76,10 @@ Muhim: testlar SQLite'da ishlaydi — MySQL'ga xos xatolar ko'rinmaydi. Baza/dra
 
 ## Infratuzilma (umumiy)
 
-- Prod: UzCloud (Toshkent), domen `crm.csw.uz` (sotib olinmoqda), test: `test.csw.uz`.
+- Prod: UzCloud (Toshkent), domen `csw.uz` (Airnet, 2027-11-09 gacha; DNS'da wildcard `*.csw.uz`, DNS API yo'q → Let's Encrypt faqat HTTP-01, nomlar ro'yxati bilan — `deploy/app/certs.sh`).
+- **Portallar (qaror 2026-11-09): har rol o'z subdomenida, bitta ilova.** `csw.uz`/`www` — landing; `admin.csw.uz` — faqat ruxsat etilgan IP'lardan (`admin-allow.conf`, faqat serverda); 1-bosqich: `manager`, `legal`, `account` (buxgalter); keyin: `billing` (yangi rol), `call` (operator), `gps`, `driver`, `hr` (yangi rol); kelajak, alohida tizim: `mine.csw.uz`, `mine.tpp.csw.uz`. Test: `*.test.csw.uz` → csw-test. Backend `ROLE_HOSTS` (`app/core/portals.py`: boshqa rol — `wrong_portal`, ro'yxatda yo'q host — `unknown_portal`; login/refresh/`current_user`/socket tekshiradi), cookie host-only, edge nginx faqat `.env`dagi nomlarni ochadi (qolgani 444 / TLS rad). Yangi portal: `.env` (`PORTAL_HOSTS`, `ROLE_HOSTS`, `CORS_ORIGINS`) + `./certs.sh`.
 - Deploy: GitHub Actions `dev` push'ida rasmlarni GHCR'ga chiqaradi (prod'da qayta yig'ilmaydi) (public, tag = commit SHA); serverda qo'lda `deploy/deploy.sh <sha>` — avval test, keyin aynan o'sha rasm prod'ga. Actions'da SSH kalit yo'q.
-- 3 server bitta VPC'da: **csw-app** (nginx + api + web, yagona ochiq IP), **csw-db** (MySQL, faqat app tarmog'idan), **csw-test** (ochiq IP'siz; test.csw.uz csw-app nginx orqali proksi qilinadi; prod bazaga ulana olmaydi). Hammasida Ubuntu 24.04, faqat kalit bilan SSH, ufw, fail2ban, Docker.
+- 3 server bitta VPC'da: **csw-app** (nginx + api + web, yagona ochiq IP), **csw-db** (MySQL, faqat app tarmog'idan), **csw-test** (ochiq IP'siz; `*.test.csw.uz` csw-app nginx orqali proksi qilinadi; prod bazaga ulana olmaydi). Hammasida Ubuntu 24.04, faqat kalit bilan SSH, ufw, fail2ban, Docker.
 - Fayllar: UzCloud S3 (endpoint `s3.uzcstorage.uz`, region `default`). Lokal ishlab chiqishda MinIO (`cgr.dev/chainguard/minio` — `minio/minio` Docker Hub'dan olib tashlangan).
 - IP manzillar, kirish buyruqlari va to'lov tafsilotlari — repoda emas, foydalanuvchining shaxsiy hujjatlarida.
 
@@ -86,6 +87,6 @@ Muhim: testlar SQLite'da ishlaydi — MySQL'ga xos xatolar ko'rinmaydi. Baza/dra
 
 1–4 bajarildi va `dev`da: prod'ga tayyorlik (deploy/, GHCR, `ACTIVE_ROLES`, `app.bootstrap`, health, age zaxira), Render demo olib tashlandi,
 billing (mavjud shartnoma eski narxda), demo loginlari (`DEMO_CREDENTIALS`, 7 ta `csw.*`, `seed --reset --yes`).
-5. **Prod'ga chiqish** (`dev` → `prod`) va tuman xodimlariga tarqatish. Keyin — OCR, yuz tanish, STIR.
+5. **Portallar (subdomenlar)** — avval shu, keyin **prod'ga chiqish** (`dev` → `prod`) va tuman xodimlariga tarqatish (qaror 2026-11-09). Keyin — OCR, yuz tanish, STIR.
 
 - Keyinroq: bitta STIR ostida bosh korxona guruhlash; xaritadagi takror nuqtalar tekshiruvi; maktab/bog'chalar (hududiy boshqarma orqali); printer agenti; haydovchilar uchun Telegram bot; o'z GPS monitoringi; jismoniy abonentlar; 1C o'rniga o'z buxgalteriyasi; Didox/Soliq e-faktura; qo'shimcha kelishuvlar; edo.ijro.uz muqobili — ichki hujjat aylanishi.

@@ -98,7 +98,7 @@ API'ni Postman bilan sinash: `Authorization: Bearer <token>` sarlavhasi bilan CS
 ## Prod (UzCloud) — deploy
 
 - To'liq qo'llanma: [`deploy/README.md`](deploy/README.md) — csw-app (edge nginx + TLS), csw-db (MySQL + tungi shifrlangan zaxira), csw-test.
-- Filiallar: `dev` (kundalik ish, test.csw.uz) → `prod` (crm.csw.uz) → `master` (oxirgi barqaror versiya).
+- Filiallar: `dev` (kundalik ish, `*.test.csw.uz`) → `prod` (rol portallari `*.csw.uz`) → `master` (oxirgi barqaror versiya).
 - Reliz: `dev`ga push → GitHub Actions rasmlarni GHCR'ga chiqaradi → serverda `deploy/deploy.sh <sha>` (avval test, keyin prod).
 - `GET /api/v1/health` — ilova + baza holati va versiya (SHA).
 - `ACTIVE_ROLES` — faol rollar (1-bosqich: admin, manager, legal, accountant); `python -m app.bootstrap <yaml>` — boshlang'ich xodimlar.

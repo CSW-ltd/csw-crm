@@ -86,7 +86,8 @@ def test_production_rejects_defaults():
 
 def test_production_accepts_good_settings():
     Settings(app_env="production", jwt_secret="x" * 40, cookie_secure=True, tab_sessions=False,
-             database_url="mysql+aiomysql://u:p@db/csw", active_roles="admin,manager,legal,accountant").check_production()
+             database_url="mysql+aiomysql://u:p@db/csw", active_roles="admin,manager,legal,accountant",
+             role_hosts='{"admin.csw.uz": ["admin"], "legal.csw.uz": ["legal"]}').check_production()
 
 
 def test_development_not_checked():

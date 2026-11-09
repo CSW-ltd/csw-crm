@@ -9,6 +9,9 @@ let tabMode = false;
 let demo = false;
 let activeRoles: string[] | null = null;
 export interface DemoAccount { username: string; role: string }
+/** Joriy portal (subdomen, ROLE_HOSTS). null — cheklov yo'q (lokal); roles bo'sh — noma'lum manzil. */
+export interface Portal { host: string; roles: string[] }
+let portal: Portal | null = null;
 let demoAccounts: DemoAccount[] = [];
 
 export interface Tokens { access_token: string; refresh_token: string }
@@ -16,7 +19,7 @@ export interface Tokens { access_token: string; refresh_token: string }
 export async function detectSessionMode(): Promise<void> {
   try {
     const r = await fetch("/api/v1/auth/config", { credentials: "include" });
-    if (r.ok) { const c = await r.json(); tabMode = !!c.tab_sessions; demo = !!c.demo; activeRoles = c.active_roles ?? null; demoAccounts = c.demo_accounts ?? []; }
+    if (r.ok) { const c = await r.json(); tabMode = !!c.tab_sessions; demo = !!c.demo; activeRoles = c.active_roles ?? null; demoAccounts = c.demo_accounts ?? []; portal = c.portal ?? null; }
   } catch { tabMode = false; }
 }
 
@@ -26,6 +29,9 @@ export const isDemo = () => demo;
 /** Demo hisoblar (login va rol, parolsiz) — backend DEMO_CREDENTIALS'dagi loginlar. */
 export const getDemoAccounts = () => demoAccounts;
 /** ACTIVE_ROLES: yangi xodim formasida faqat faol rollar. null — hammasi faol. */
+export const getPortal = () => portal;
+/** Portal sarlavhasi uchun asosiy rol (bitta rolli portal). null — umumiy kirish. */
+export const portalRole = (): string | null => (portal && portal.roles.length === 1 ? portal.roles[0] : null);
 export const isRoleActive = (role: string) => activeRoles === null || activeRoles.includes(role);
 
 export function getTokens(): Tokens | null {

@@ -1,5 +1,6 @@
 # csw-app: yagona ochiq IP. edge nginx (80/443, TLS) → web (SPA + /api proksi) → api.
-# test.csw.uz → csw-test'ning ichki IP'si (TEST_UPSTREAM). Baza — csw-db (DB_HOST), fayllar — UzCloud S3.
+# Hostlar (.env): csw.uz — landing, admin.csw.uz — faqat admin-allow.conf IP'laridan, rol portallari (PORTAL_HOSTS),
+# *.test.csw.uz → csw-test'ning ichki IP'si (TEST_UPSTREAM). Baza — csw-db (DB_HOST), fayllar — UzCloud S3.
 # Ishga tushirish: deploy/README.md. Rasm versiyasi: ../deploy.sh <sha>
 name: csw-app
 
@@ -34,11 +35,16 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      PROD_DOMAIN: ${PROD_DOMAIN:-crm.csw.uz}
-      TEST_DOMAIN: ${TEST_DOMAIN:-test.csw.uz}
+      SITE_HOST: ${SITE_HOST:?SITE_HOST kerak (masalan csw.uz)}
+      ADMIN_HOST: ${ADMIN_HOST:?ADMIN_HOST kerak}
+      PORTAL_HOSTS: ${PORTAL_HOSTS:?PORTAL_HOSTS kerak (bo'sh joy bilan)}
+      TEST_HOSTS: ${TEST_HOSTS:?TEST_HOSTS kerak (bo'sh joy bilan)}
+      CERT_NAME: ${CERT_NAME:-csw.uz}
       TEST_UPSTREAM: ${TEST_UPSTREAM:?TEST_UPSTREAM kerak (csw-test ichki IP:port)}
     volumes:
       - ./nginx/templates:/etc/nginx/templates:ro
+      - ./nginx/landing:/usr/share/nginx/landing:ro
+      - ./admin-allow.conf:/etc/nginx/admin-allow.conf:ro   # yo'q bo'lsa edge ishga tushmaydi (README)
       - certs:/etc/letsencrypt:ro
       - acme:/var/www/certbot:ro
     # Yangilangan sertifikatlarni olish uchun har 6 soatda nginx -s reload
