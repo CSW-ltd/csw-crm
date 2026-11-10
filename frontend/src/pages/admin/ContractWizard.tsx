@@ -82,6 +82,8 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   // Mavjud shartnoma: yangi bilan bir xil forma + raqam, imzolangan sana, platforma ID, skan → buxgalter tasdig'iga
   const [ex, setEx] = useState(EMPTY_EX);
   const [exFile, setExFile] = useState<File | null>(null);
+  // Mavjud shartnoma, bazada yo'q korxona: nom (rekvizitlar.name) va tuman shu sahifada; korxona «Tekshirish»da yaratiladi
+  const [exDistrict, setExDistrict] = useState<number | "">(districts.length === 1 ? districts[0].id : "");
   const exFileRef = useRef<HTMLInputElement>(null);
   // Korxonaning bazadagi nuqtasi: o'zgarmasa maqom saqlanadi, o'zgarsa — «kutilmoqda»
   const [origLoc, setOrigLoc] = useState<{ lat: number | null; lng: number | null; status?: string } | null>(null);
@@ -92,6 +94,8 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   const canPrice = can("customers.existing_price");
   const switchMode = (m: Mode) => {  // rejim almashganda forma tozalanadi
     setMode(m); setCustomer(null); setForm(emptyForm()); setEx(EMPTY_EX); setExFile(null); setChecked(null); setTariff(undefined);
+    setOrigLoc(null); setExDistrict(districts.length === 1 ? districts[0].id : "");
+    setStep(m === "existing" ? 1 : 0);  // mavjud shartnoma — alohida «Korxona» qadamisiz, bitta sahifa
   };
   const fromCustomer = (c: Partial<Requisites> & { name: string }) => ({ ...EMPTY_REQ, ...Object.fromEntries(Object.entries(c)
     .filter(([k]) => k in EMPTY_REQ).map(([k, v]) => [k, k === "is_rented" ? !!v : k === "lat" || k === "lng" ? v ?? null : v ?? ""])) } as Requisites);
@@ -113,10 +117,11 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   }, []);
   useEffect(() => { if (contractId) contractsApi.get(contractId).then(fromContract).catch(fail); }, [contractId, fromContract, fail]);
   // Narx — davlat ta'rifi (tuman → viloyat), shartnoma boshlanish sanasidagi; qo'lda kiritilmaydi
+  const tariffDistrict = customer?.district_id ?? (isEx && exDistrict !== "" ? exDistrict : null);
   useEffect(() => {
-    if (!customer || !form.valid_from) return;
-    tariffsApi.price(customer.district_id, form.valid_from).then((r) => setTariff(r.price)).catch(() => setTariff(null));
-  }, [customer, form.valid_from]);
+    if (tariffDistrict == null || !form.valid_from) return;
+    tariffsApi.price(tariffDistrict, form.valid_from).then((r) => setTariff(r.price)).catch(() => setTariff(null));
+  }, [tariffDistrict, form.valid_from]);
 
   const pickCustomer = async (id: number) => {
     if (mode === "existing") {
@@ -143,7 +148,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     } catch (e) { fail(e); }
   };
 
-  const payload = (): ContractDraft => ({ ...form, type: manualSrc ? form.type : "by_volume", customer_id: customer!.id,
+  const payload = (customerId = customer!.id): ContractDraft => ({ ...form, type: manualSrc ? form.type : "by_volume", customer_id: customerId,
     price_reason: (form.price_reason ?? "").trim() || null,
     existing: isEx ? { number: ex.number.trim(), signed_on: ex.signed_on || null, platform: form.sign_method === "electronic" ? ex.platform : null,
       platform_id: form.sign_method === "electronic" ? ex.platform_id.trim() || null : null } : null, requisites: Object.fromEntries(Object.entries(form.requisites)
@@ -155,10 +160,23 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     }
     onClose();
   };
+  /** Mavjud shartnoma, korxona bazada yo'q: nom va tuman bo'yicha korxona yaratiladi (birinchi «Tekshirish»da). */
+  const ensureCustomer = async (): Promise<number | null> => {
+    if (customer) return customer.id;
+    const name = form.requisites.name.trim();
+    if (name.length < 2 || exDistrict === "") { toast(t("ex_need_name_district"), "error"); return null; }
+    const c = await customersApi.create({ name, district_id: exDistrict });
+    setCustomer({ id: c.id, name: c.name, district_id: c.district_id });
+    setOrigLoc({ lat: null, lng: null });
+    changed();
+    return c.id;
+  };
   const runCheck = async () => {
     setBusy(true);
     try {
-      const r = await contractsApi.check(payload(), ct?.id);
+      const cid = await ensureCustomer();
+      if (cid == null) return;
+      const r = await contractsApi.check(payload(cid), ct?.id);
       setChecked(r);
       const names = [...new Set(r.errors.map((e) => errLabel(e.field)))];
       toast(r.ok ? t("ctr_check_ok") : t("ctr_check_bad_list", { n: r.errors.length, list: names.slice(0, 3).join(", ") + (names.length > 3 ? "…" : "") }),
@@ -224,17 +242,31 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
         {step >= 0 && mode !== "excel" && <Stepper activeStep={step} alternativeLabel sx={{ mb: 2.5 }}>{steps.map((s) => <Step key={s}><StepLabel>{s}</StepLabel></Step>)}</Stepper>}
         {ct?.status === "returned" && ct.return_comment && <Alert severity="error" sx={{ mb: 2 }} id="ctr-returned">
           <b>{t("ctr_returned_by")}</b> {ct.return_comment}</Alert>}
-        {step === 0 && <Stack spacing={2}>
+        {!ct && !contractId && (step === 0 || (isEx && step === 1)) && <Stack spacing={2} sx={{ mb: step === 1 ? 2 : 0 }}>
           <ToggleButtonGroup exclusive fullWidth value={mode} onChange={(_, v) => { if (v && v !== mode) switchMode(v); }} id="ctr-mode"
             sx={{ flexWrap: { xs: "wrap", sm: "nowrap" } }}>
             {(["new", "existing", "excel"] as const).map((m) => <ToggleButton key={m} value={m} data-mode={m} sx={{ fontWeight: 700, borderTop: 4,
               borderTopColor: `${MODE_COLOR[m]} !important`, "&.Mui-selected, &.Mui-selected:hover": { bgcolor: MODE_COLOR[m], color: "#fff" } }}>
               {t(`ctr_mode_${m}` as MessageKey)}</ToggleButton>)}
           </ToggleButtonGroup>
-          {mode === "excel" ? <ExistingImport fail={fail} onDone={() => { changed(); }} />
-            : <CustomerStep districts={districts} onPick={pickCustomer} fail={fail} />}
+          {step === 0 && (mode === "excel" ? <ExistingImport fail={fail} onDone={() => { changed(); }} />
+            : <CustomerStep districts={districts} onPick={pickCustomer} fail={fail} />)}
         </Stack>}
-        {step === 1 && customer && <Stack spacing={2}>
+        {step === 1 && (customer || isEx) && <Stack spacing={2}>
+          {isEx && !customer && <Stack spacing={2} id="ex-customer" sx={{ maxWidth: 640, width: "100%", mx: "auto", py: 1 }}>
+            <Typography variant="body2" color="text.secondary" textAlign="center">{t("ex_pick_or_new")}</Typography>
+            <CustomerSearch districts={districts} onPick={pickCustomer} />
+            <Divider>{t("ctr_or")}</Divider>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <TextField id="ex-nc-name" size="small" name="name" label={t("ctr_f_name")} value={form.requisites.name} sx={{ flex: 1 }}
+                onChange={(e) => setReq("name", e.target.value)} />
+              <TextField id="ex-nc-district" select size="small" label={t("district")} value={exDistrict} sx={{ minWidth: 200 }}
+                onChange={(e) => { const d = Number(e.target.value); setExDistrict(d); setChecked(null);
+                  setForm((f) => ({ ...f, place: f.place || districtName(d) })); }}>
+                {districts.filter((d) => d.is_active).map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
+              </TextField>
+            </Stack>
+          </Stack>}
           {checked && !checked.ok && <Alert severity="error" id="ctr-errors" ref={errBox} sx={{ scrollMarginTop: 16 }}>
             <Typography fontWeight={700}>{t("ctr_errors_title", { n: checked.errors.length })}</Typography>
             <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2.5 }}>
@@ -243,9 +275,9 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
                   textDecoration: "underline", "&:focus-visible": { outline: 2 } }}>{errLabel(e.field)}</Box> — {t(`ce_${e.code}` as MessageKey)}</li>)}
             </Box>
           </Alert>}
-          <Typography variant="subtitle2" color="text.secondary">{t("ctr_requisites")} · {districtName(customer.district_id)}</Typography>
+          <Typography variant="subtitle2" color="text.secondary">{t("ctr_requisites")}{customer ? ` · ${districtName(customer.district_id)}` : ""}</Typography>
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" } }}>
-            {REQ_FIELDS.map((f) => f.k === "cadastre"
+            {REQ_FIELDS.filter((f) => !(f.k === "name" && isEx && !customer)).map((f) => f.k === "cadastre"
               ? <Stack key={f.k} direction="row" spacing={1} alignItems="flex-start">
                 <TextField size="small" name="cadastre" label={`${t("ctr_f_cadastre")} (${t("ctr_optional_short")})`} value={form.requisites.cadastre ?? ""}
                   onChange={(e) => setReq("cadastre", e.target.value)} sx={{ flex: 1 }} />
@@ -357,12 +389,11 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   );
 }
 
-function CustomerStep({ districts, onPick, fail }: { districts: District[]; onPick: (id: number) => void; fail: (e: unknown) => void }) {
+/** Bazadan korxona qidirish (nomi, maxsus raqam yoki STIR) — yangi va mavjud shartnoma rejimlarida. */
+function CustomerSearch({ districts, onPick }: { districts: District[]; onPick: (id: number) => void }) {
   const { t } = useI18n();
   const [q, setQ] = useState("");
   const [opts, setOpts] = useState<CustomerListItem[]>([]);
-  const [nw, setNw] = useState<{ name: string; district_id: number | "" } | null>(null);
-  const [busy, setBusy] = useState(false);
   useEffect(() => {
     const h = window.setTimeout(() => {
       if (q.trim().length < 2) { setOpts([]); return; }
@@ -370,6 +401,17 @@ function CustomerStep({ districts, onPick, fail }: { districts: District[]; onPi
     }, 300);
     return () => window.clearTimeout(h);
   }, [q]);
+  return <Autocomplete id="ctr-customer-search" options={opts} filterOptions={(x) => x} getOptionLabel={(o) => `${o.name}${o.code ? ` · ${o.code}` : ""}${o.stir ? ` · ${o.stir}` : ""}`}
+    onInputChange={(_, v) => setQ(v)} onChange={(_, v) => v && onPick(v.id)} noOptionsText={q.length < 2 ? t("ctr_type_2") : t("no_results")}
+    renderOption={(props, o) => <li {...props} key={o.id}><Box><Typography>{o.name}</Typography>
+      <Typography variant="caption" color="text.secondary">{o.code} · {o.stir ?? "—"} · {districts.find((d) => d.id === o.district_id)?.name}</Typography></Box></li>}
+    renderInput={(p) => <TextField {...p} label={t("ctr_find_customer")} placeholder={t("ctr_find_hint")} />} />;
+}
+
+function CustomerStep({ districts, onPick, fail }: { districts: District[]; onPick: (id: number) => void; fail: (e: unknown) => void }) {
+  const { t } = useI18n();
+  const [nw, setNw] = useState<{ name: string; district_id: number | "" } | null>(null);
+  const [busy, setBusy] = useState(false);
   const create = async () => {
     if (!nw || nw.name.trim().length < 2 || nw.district_id === "") return;
     setBusy(true);
@@ -377,12 +419,8 @@ function CustomerStep({ districts, onPick, fail }: { districts: District[]; onPi
     catch (e) { fail(e); } finally { setBusy(false); }
   };
   return (
-    <Stack spacing={2} sx={{ maxWidth: 640, mx: "auto" }}>
-      <Autocomplete id="ctr-customer-search" options={opts} filterOptions={(x) => x} getOptionLabel={(o) => `${o.name}${o.code ? ` · ${o.code}` : ""}${o.stir ? ` · ${o.stir}` : ""}`}
-        onInputChange={(_, v) => setQ(v)} onChange={(_, v) => v && onPick(v.id)} noOptionsText={q.length < 2 ? t("ctr_type_2") : t("no_results")}
-        renderOption={(props, o) => <li {...props} key={o.id}><Box><Typography>{o.name}</Typography>
-          <Typography variant="caption" color="text.secondary">{o.code} · {o.stir ?? "—"} · {districts.find((d) => d.id === o.district_id)?.name}</Typography></Box></li>}
-        renderInput={(p) => <TextField {...p} label={t("ctr_find_customer")} placeholder={t("ctr_find_hint")} />} />
+    <Stack spacing={2} id="ctr-customer-step" sx={{ maxWidth: 640, width: "100%", mx: "auto", minHeight: { sm: "40vh" }, justifyContent: "center" }}>
+      <CustomerSearch districts={districts} onPick={onPick} />
       <Divider>{t("ctr_or")}</Divider>
       {!nw ? <Button id="ctr-new-customer" variant="outlined" onClick={() => setNw({ name: "", district_id: districts.length === 1 ? districts[0].id : "" })}>
         {t("ctr_new_customer")}</Button>

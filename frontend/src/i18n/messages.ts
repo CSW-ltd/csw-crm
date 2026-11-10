@@ -678,7 +678,7 @@ export const MESSAGES = {
   tab_payments: ["To'lovlar", "Платежи", "Payments"],
   m_accounting: ["Buxgalteriya", "Бухгалтерия", "Accounting"],
   a_payments: ["To'lovlarni kiritish", "Ввод платежей", "Enter payments"],
-  new_contract: ["Yangi shartnoma", "Новый договор", "New contract"],
+  new_contract: ["Shartnoma qo'shish", "Добавить договор", "Add contract"],
   all_districts: ["Barcha tumanlar", "Все районы", "All districts"],
   cmp_contracted: ["Shartnomasi bor korxonalar", "Организации с договором", "Companies with a contract"],
   cmp_contracted_hint: ["Bosing — pastdagi jadvalga o'tadi", "Нажмите — переход к таблице", "Click to jump to the table"],
@@ -1187,6 +1187,8 @@ export const MESSAGES = {
   err_unknown_portal: ["Bu manzil orqali tizimga kirib bo'lmaydi. Bo'limingiz manzilini rahbaringizdan so'rang.",
     "Через этот адрес войти нельзя. Уточните адрес вашего отдела у руководителя.",
     "Sign-in is not available at this address. Ask your manager for your department's address."],
+  ex_need_name_district: ["Korxona nomi (kamida 2 belgi) va tumanni kiriting", "Укажите название (мин. 2 символа) и район", "Enter the company name (2+ chars) and district"],
+  ex_pick_or_new: ["Bazadagi korxonani tanlang yoki yangisining nomi va tumanini kiriting", "Выберите предприятие из базы или введите название и район нового", "Pick a company from the base or enter a new one's name and district"],
   // backend xato kodlari
   err_bad_metric: ["Noto'g'ri ko'rsatkich", "Неверный показатель", "Invalid metric"],
   err_network: ["Server bilan aloqa yo'q", "Нет связи с сервером", "Cannot reach the server"],
