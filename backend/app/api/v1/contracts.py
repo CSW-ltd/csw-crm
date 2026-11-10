@@ -71,12 +71,26 @@ async def scan_upload(contract_id: int, file: UploadFile = File(...), user: User
 
 class StartIn(BaseModel):
     customer_id: int
+    appeal_id: int | None = None  # yangi korxona murojaatidan
 
 
 @router.post("/start", status_code=201)
 async def start(body: StartIn, user: User = Legal, db: AsyncSession = DB) -> dict:
     """Usta: korxona tanlandi — tugallanmagan loyiha (raqamsiz) yaratiladi."""
-    return svc.out(await svc.start(db, user, body.customer_id), with_events=True)
+    return svc.out(await svc.start(db, user, body.customer_id, body.appeal_id), with_events=True)
+
+
+@router.get("/lookup")
+async def lookup(stir: str = Query(pattern=r"^\d{9}$"), user: User = Legal, db: AsyncSession = DB) -> dict:
+    """STIR bo'yicha korxona va amaldagi shartnoma (bo'lsa — qo'shimcha shartnoma taklif qilinadi)."""
+    return await svc.lookup(db, user, stir)
+
+
+@router.post("/counterparty", status_code=201)
+async def counterparty(body: svc.CounterpartyIn, user: User = Legal, db: AsyncSession = DB) -> dict:
+    """Kontragent → korxona: STIR bazada bo'lsa o'sha, aks holda rekvizitlardan yangi korxona."""
+    c = await svc.counterparty(db, user, body)
+    return {"id": c.id, "name": c.name, "district_id": c.district_id, "code": c.code}
 
 
 @router.put("/{contract_id}/draft")

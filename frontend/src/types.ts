@@ -255,6 +255,12 @@ export interface RequestDetail extends RequestItem {
   events: { status: RequestStatus; note: string | null; actor_name: string | null; created_at: string }[];
 }
 
+/** STIR bo'yicha qidiruv natijasi (shartnoma ustasining birinchi qadami). */
+export interface StirLookup {
+  customer: { id: number; name: string; district_id: number; code: string } | null;
+  active_contract: { id: number; number: string; valid_from: string; valid_to: string } | null;
+}
+
 export interface Appeal {
   id: number;
   number: string | null;
@@ -276,6 +282,7 @@ export interface Appeal {
   reject_reason: string | null;
   customer_id: number | null;
   request_id: number | null;
+  contract_id?: number | null;
   created_at: string;
 }
 

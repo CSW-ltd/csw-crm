@@ -1,4 +1,4 @@
-"""Shartnomada obyekt koordinatasi (majburiy): tekshiruv, «kutilmoqda» (legal), haydovchi tashrifida avtomatik tasdiq yoki ogohlantirish."""
+"""Shartnomada obyekt koordinatasi (ixtiyoriy, kiritilsa — to'g'ri): tekshiruv, «kutilmoqda» (legal), haydovchi tashrifida avtomatik tasdiq yoki ogohlantirish."""
 from sqlalchemy import select, update
 
 from app.models import Customer, SituationEvent
@@ -17,11 +17,13 @@ def _codes(r) -> set:
     return {(e["field"], e["code"]) for e in r.json()["errors"]}
 
 
-async def test_coords_required_and_validated(world, client_factory):
+async def test_coords_optional_but_validated(world, client_factory):
     legal = await client_factory("legal")
     cid = await _new_cust(legal, world)
     no = {k: v for k, v in REQ.items() if k not in ("lat", "lng")}
-    assert ("coords", "required") in _codes(await legal.post("/api/v1/contracts/check", json=body(cid, requisites=no)))
+    assert not any(f == "coords" for f, _ in _codes(await legal.post("/api/v1/contracts/check", json=body(cid, requisites=no))))
+    half = {**no, "lat": 40.64}
+    assert ("coords", "required") in _codes(await legal.post("/api/v1/contracts/check", json=body(cid, requisites=half)))
     swapped = {**REQ, "lat": 72.2390, "lng": 40.6415}
     assert ("coords", "swapped") in _codes(await legal.post("/api/v1/contracts/check", json=body(cid, requisites=swapped)))
     far = {**REQ, "lat": 25.20, "lng": 55.27}  # Dubay

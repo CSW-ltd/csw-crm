@@ -17,7 +17,7 @@ import { MESSAGES } from "@/i18n/messages";
 import { useI18n } from "@/i18n/I18nContext";
 import type { MessageKey } from "@/i18n/messages";
 import { toast } from "@/lib/alerts";
-import type { ContractCheck, ContractDraft, ContractItem, ContractType, CustomerListItem, District, Requisites } from "@/types";
+import type { Appeal, ContractCheck, ContractDraft, ContractItem, ContractType, CustomerListItem, District, Requisites, StirLookup } from "@/types";
 import { fmtMoney } from "./CompaniesTab";
 import { ExistingImport } from "./ExistingContracts";
 
@@ -45,7 +45,7 @@ export function saveBlob(blob: Blob, name: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
 }
 
-interface Props { districts: District[]; contractId?: number; onClose: () => void; onDone?: (c: ContractItem) => void }
+interface Props { districts: District[]; contractId?: number; appeal?: Appeal; onClose: () => void; onDone?: (c: ContractItem) => void }
 
 type Mode = "new" | "existing" | "excel";
 /** Uch rejim bir-biridan rang, sarlavha va banner bilan ajraladi. */
@@ -58,8 +58,9 @@ const ERR_LABEL: Record<string, MessageKey> = { price: "ctr_price", price_reason
   signed_on: "signed_on", platform_id: "ctr_platform_id", type: "contract_type", coords: "coords_title" };
 const ERR_INPUT: Record<string, string> = { number: "ex_number", signed_on: "ex_signed", platform_id: "ex_pid" };
 
-/** «Yangi shartnoma»: 1) korxona 2) rekvizitlar va shartlar → «Tekshirish» → raqam 3) hujjat (PDF/Word) → «Imzolandi — buxgalteriyaga yuborish». */
-export function ContractWizard({ districts, contractId, onClose, onDone }: Props) {
+/** «Shartnoma qo'shish»: 1) kontragent (STIR yoki qidiruv; korxona = kontragent) 2) rekvizitlar va shartlar → «Tekshirish» → raqam
+ * 3) hujjat (PDF/Word) → «Imzolandi — buxgalteriyaga yuborish». appeal — yangi korxona murojaatidan (raqam olganda murojaat yopiladi). */
+export function ContractWizard({ districts, contractId, appeal, onClose, onDone }: Props) {
   const { t, tErr } = useI18n();
   const theme = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down("sm"));
@@ -82,8 +83,10 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   // Mavjud shartnoma: yangi bilan bir xil forma + raqam, imzolangan sana, platforma ID, skan → buxgalter tasdig'iga
   const [ex, setEx] = useState(EMPTY_EX);
   const [exFile, setExFile] = useState<File | null>(null);
-  // Mavjud shartnoma, bazada yo'q korxona: nom (rekvizitlar.name) va tuman shu sahifada; korxona «Tekshirish»da yaratiladi
-  const [exDistrict, setExDistrict] = useState<number | "">(districts.length === 1 ? districts[0].id : "");
+  // Bazada yo'q kontragent (STIR topilmadi): korxona birinchi «Tekshirish»da rekvizitlardan yaratiladi
+  const [pendingStir, setPendingStir] = useState<string | null>(null);
+  const [stirLock, setStirLock] = useState(false);  // STIR qidiruvdan kelgan — rekvizitlarda o'zgartirilmaydi
+  const [cpDistrict, setCpDistrict] = useState<number | "">(appeal?.district_id ?? (districts.length === 1 ? districts[0].id : ""));
   const exFileRef = useRef<HTMLInputElement>(null);
   // Korxonaning bazadagi nuqtasi: o'zgarmasa maqom saqlanadi, o'zgarsa — «kutilmoqda»
   const [origLoc, setOrigLoc] = useState<{ lat: number | null; lng: number | null; status?: string } | null>(null);
@@ -94,8 +97,17 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   const canPrice = can("customers.existing_price");
   const switchMode = (m: Mode) => {  // rejim almashganda forma tozalanadi
     setMode(m); setCustomer(null); setForm(emptyForm()); setEx(EMPTY_EX); setExFile(null); setChecked(null); setTariff(undefined);
-    setOrigLoc(null); setExDistrict(districts.length === 1 ? districts[0].id : "");
-    setStep(m === "existing" ? 1 : 0);  // mavjud shartnoma — alohida «Korxona» qadamisiz, bitta sahifa
+    setOrigLoc(null); setPendingStir(null); setStirLock(false); setCpDistrict(appeal?.district_id ?? (districts.length === 1 ? districts[0].id : ""));
+    setStep(0);
+  };
+  /** STIR bazada yo'q — rekvizitlar formasi: STIR qulflangan, nom/telefon murojaatdan (bo'lsa). */
+  const startNew = (stir: string) => {
+    const name = appeal && !appeal.org_name.startsWith("Yangi korxona") ? appeal.org_name : "";
+    setPendingStir(stir); setStirLock(true); setCustomer(null); setOrigLoc(null); setChecked(null);
+    setForm((f) => ({ ...f, place: f.place || (cpDistrict !== "" ? districtName(cpDistrict) : ""),
+      sign_method: mode === "existing" ? "paper" : f.sign_method,
+      requisites: { ...EMPTY_REQ, stir, name, phone: appeal?.caller_phone ?? "" } }));
+    setStep(1);
   };
   const fromCustomer = (c: Partial<Requisites> & { name: string }) => ({ ...EMPTY_REQ, ...Object.fromEntries(Object.entries(c)
     .filter(([k]) => k in EMPTY_REQ).map(([k, v]) => [k, k === "is_rented" ? !!v : k === "lat" || k === "lng" ? v ?? null : v ?? ""])) } as Requisites);
@@ -117,7 +129,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
   }, []);
   useEffect(() => { if (contractId) contractsApi.get(contractId).then(fromContract).catch(fail); }, [contractId, fromContract, fail]);
   // Narx — davlat ta'rifi (tuman → viloyat), shartnoma boshlanish sanasidagi; qo'lda kiritilmaydi
-  const tariffDistrict = customer?.district_id ?? (isEx && exDistrict !== "" ? exDistrict : null);
+  const tariffDistrict = customer?.district_id ?? (pendingStir && cpDistrict !== "" ? cpDistrict : null);
   useEffect(() => {
     if (tariffDistrict == null || !form.valid_from) return;
     tariffsApi.price(tariffDistrict, form.valid_from).then((r) => setTariff(r.price)).catch(() => setTariff(null));
@@ -127,7 +139,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     if (mode === "existing") {
       try {
         const c = await customersApi.get(id);
-        setOrigLoc({ lat: c.lat, lng: c.lng, status: c.location_status });
+        setOrigLoc({ lat: c.lat, lng: c.lng, status: c.location_status }); setStirLock(!!c.stir);
         setCustomer({ id: c.id, name: c.name, district_id: c.district_id });
         setForm((f) => ({ ...f, place: f.place || districtName(c.district_id), sign_method: "paper", requisites: fromCustomer(c as unknown as Requisites) }));
         setChecked(null);
@@ -137,8 +149,8 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     }
     try {
       const c = await customersApi.get(id);
-      setOrigLoc({ lat: c.lat, lng: c.lng, status: c.location_status });
-      const draft = await contractsApi.start(c.id);  // «Tugallanmagan shartnomalar»da darhol paydo bo'ladi
+      setOrigLoc({ lat: c.lat, lng: c.lng, status: c.location_status }); setStirLock(!!c.stir);
+      const draft = await contractsApi.start(c.id, appeal?.id);  // «Tugallanmagan shartnomalar»da darhol paydo bo'ladi
       changed();
       setCt(draft);
       setCustomer({ id: c.id, name: c.name, district_id: c.district_id });
@@ -160,23 +172,29 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
     }
     onClose();
   };
-  /** Mavjud shartnoma, korxona bazada yo'q: nom va tuman bo'yicha korxona yaratiladi (birinchi «Tekshirish»da). */
-  const ensureCustomer = async (): Promise<number | null> => {
-    if (customer) return customer.id;
+  /** Bazada yo'q kontragent: birinchi «Tekshirish»da korxona (va yangi shartnomada — loyiha) yaratiladi. */
+  const ensureCustomer = async (): Promise<{ cid: number; ctId?: number } | null> => {
+    if (customer) return { cid: customer.id, ctId: ct?.id };
     const name = form.requisites.name.trim();
-    if (name.length < 2 || exDistrict === "") { toast(t("ex_need_name_district"), "error"); return null; }
-    const c = await customersApi.create({ name, district_id: exDistrict });
+    if (name.length < 2 || cpDistrict === "" || !pendingStir) { toast(t("ex_need_name_district"), "error"); return null; }
+    const c = await contractsApi.counterparty({ stir: pendingStir, name, district_id: cpDistrict, phone: form.requisites.phone || null });
     setCustomer({ id: c.id, name: c.name, district_id: c.district_id });
     setOrigLoc({ lat: null, lng: null });
+    setPendingStir(null);
+    let ctId: number | undefined;
+    if (!isEx) {  // yangi shartnoma — loyiha darhol «Tugallanmagan»da (murojaatga bog'lanadi)
+      const draft = await contractsApi.start(c.id, appeal?.id);
+      setCt(draft); ctId = draft.id;
+    }
     changed();
-    return c.id;
+    return { cid: c.id, ctId };
   };
   const runCheck = async () => {
     setBusy(true);
     try {
-      const cid = await ensureCustomer();
-      if (cid == null) return;
-      const r = await contractsApi.check(payload(cid), ct?.id);
+      const ids = await ensureCustomer();
+      if (!ids) return;
+      const r = await contractsApi.check(payload(ids.cid), ids.ctId);
       setChecked(r);
       const names = [...new Set(r.errors.map((e) => errLabel(e.field)))];
       toast(r.ok ? t("ctr_check_ok") : t("ctr_check_bad_list", { n: r.errors.length, list: names.slice(0, 3).join(", ") + (names.length > 3 ? "…" : "") }),
@@ -242,7 +260,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
         {step >= 0 && mode !== "excel" && <Stepper activeStep={step} alternativeLabel sx={{ mb: 2.5 }}>{steps.map((s) => <Step key={s}><StepLabel>{s}</StepLabel></Step>)}</Stepper>}
         {ct?.status === "returned" && ct.return_comment && <Alert severity="error" sx={{ mb: 2 }} id="ctr-returned">
           <b>{t("ctr_returned_by")}</b> {ct.return_comment}</Alert>}
-        {!ct && !contractId && (step === 0 || (isEx && step === 1)) && <Stack spacing={2} sx={{ mb: step === 1 ? 2 : 0 }}>
+        {!ct && !contractId && step === 0 && <Stack spacing={2}>
           <ToggleButtonGroup exclusive fullWidth value={mode} onChange={(_, v) => { if (v && v !== mode) switchMode(v); }} id="ctr-mode"
             sx={{ flexWrap: { xs: "wrap", sm: "nowrap" } }}>
             {(["new", "existing", "excel"] as const).map((m) => <ToggleButton key={m} value={m} data-mode={m} sx={{ fontWeight: 700, borderTop: 4,
@@ -250,22 +268,22 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
               {t(`ctr_mode_${m}` as MessageKey)}</ToggleButton>)}
           </ToggleButtonGroup>
           {step === 0 && (mode === "excel" ? <ExistingImport fail={fail} onDone={() => { changed(); }} />
-            : <CustomerStep districts={districts} onPick={pickCustomer} fail={fail} />)}
+            : <CounterpartyStep key={mode} districts={districts} initialStir={appeal?.stir ?? undefined} onPick={pickCustomer} onNew={startNew} fail={fail} />)}
         </Stack>}
-        {step === 1 && (customer || isEx) && <Stack spacing={2}>
-          {isEx && !customer && <Stack spacing={2} id="ex-customer" sx={{ maxWidth: 640, width: "100%", mx: "auto", py: 1 }}>
-            <Typography variant="body2" color="text.secondary" textAlign="center">{t("ex_pick_or_new")}</Typography>
-            <CustomerSearch districts={districts} onPick={pickCustomer} />
-            <Divider>{t("ctr_or")}</Divider>
+        {step === 1 && (customer || pendingStir) && <Stack spacing={2}>
+          {pendingStir && !customer && <Stack spacing={1.5} id="cp-new" sx={{ maxWidth: 640, width: "100%", mx: "auto", py: 1 }}>
+            <Typography fontWeight={700} textAlign="center">{t("cp_new_title", { stir: pendingStir })}</Typography>
+            <Typography variant="body2" color="text.secondary" textAlign="center">{t("cp_new_hint")}</Typography>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-              <TextField id="ex-nc-name" size="small" name="name" label={t("ctr_f_name")} value={form.requisites.name} sx={{ flex: 1 }}
+              <TextField id="cp-name" size="small" name="name" label={t("ctr_f_name")} value={form.requisites.name} sx={{ flex: 1 }}
                 onChange={(e) => setReq("name", e.target.value)} />
-              <TextField id="ex-nc-district" select size="small" label={t("district")} value={exDistrict} sx={{ minWidth: 200 }}
-                onChange={(e) => { const d = Number(e.target.value); setExDistrict(d); setChecked(null);
+              <TextField id="cp-district" select size="small" label={t("district")} value={cpDistrict} sx={{ minWidth: 200 }}
+                onChange={(e) => { const d = Number(e.target.value); setCpDistrict(d); setChecked(null);
                   setForm((f) => ({ ...f, place: f.place || districtName(d) })); }}>
                 {districts.filter((d) => d.is_active).map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
               </TextField>
             </Stack>
+            <Button size="small" onClick={() => { setPendingStir(null); setStep(0); }} sx={{ alignSelf: "center" }}>{t("cp_search")}…</Button>
           </Stack>}
           {checked && !checked.ok && <Alert severity="error" id="ctr-errors" ref={errBox} sx={{ scrollMarginTop: 16 }}>
             <Typography fontWeight={700}>{t("ctr_errors_title", { n: checked.errors.length })}</Typography>
@@ -277,7 +295,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
           </Alert>}
           <Typography variant="subtitle2" color="text.secondary">{t("ctr_requisites")}{customer ? ` · ${districtName(customer.district_id)}` : ""}</Typography>
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" } }}>
-            {REQ_FIELDS.filter((f) => !(f.k === "name" && isEx && !customer)).map((f) => f.k === "cadastre"
+            {REQ_FIELDS.filter((f) => !(f.k === "name" && pendingStir && !customer)).map((f) => f.k === "cadastre"
               ? <Stack key={f.k} direction="row" spacing={1} alignItems="flex-start">
                 <TextField size="small" name="cadastre" label={`${t("ctr_f_cadastre")} (${t("ctr_optional_short")})`} value={form.requisites.cadastre ?? ""}
                   onChange={(e) => setReq("cadastre", e.target.value)} sx={{ flex: 1 }} />
@@ -288,6 +306,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
               onChange={(e) => setReq(f.k, f.digits ? onlyDigits(e.target.value, f.digits) : e.target.value)} error={!!errOf(f.k)}
               helperText={helper(f.k, f.digits && f.k !== "oked" ? String(f.digits) : undefined)}
               inputProps={f.digits ? { inputMode: "numeric", maxLength: f.digits } : undefined}
+              InputProps={f.k === "stir" && stirLock ? { readOnly: true } : undefined}
               sx={{ gridColumn: { md: `span ${f.span}` } }} />)}
             <CoordFields lat={form.requisites.lat} lng={form.requisites.lng} error={errOf("coords") ? helper("coords") : undefined}
               status={coordStatus()}
@@ -390,7 +409,7 @@ export function ContractWizard({ districts, contractId, onClose, onDone }: Props
 }
 
 /** Bazadan korxona qidirish (nomi, maxsus raqam yoki STIR) — yangi va mavjud shartnoma rejimlarida. */
-function CustomerSearch({ districts, onPick }: { districts: District[]; onPick: (id: number) => void }) {
+function CustomerSearch({ districts, onPick }: { districts: District[]; onPick: (id: number, stir?: string | null) => void }) {
   const { t } = useI18n();
   const [q, setQ] = useState("");
   const [opts, setOpts] = useState<CustomerListItem[]>([]);
@@ -402,37 +421,57 @@ function CustomerSearch({ districts, onPick }: { districts: District[]; onPick: 
     return () => window.clearTimeout(h);
   }, [q]);
   return <Autocomplete id="ctr-customer-search" options={opts} filterOptions={(x) => x} getOptionLabel={(o) => `${o.name}${o.code ? ` · ${o.code}` : ""}${o.stir ? ` · ${o.stir}` : ""}`}
-    onInputChange={(_, v) => setQ(v)} onChange={(_, v) => v && onPick(v.id)} noOptionsText={q.length < 2 ? t("ctr_type_2") : t("no_results")}
+    onInputChange={(_, v) => setQ(v)} onChange={(_, v) => v && onPick(v.id, v.stir)} noOptionsText={q.length < 2 ? t("ctr_type_2") : t("no_results")}
     renderOption={(props, o) => <li {...props} key={o.id}><Box><Typography>{o.name}</Typography>
       <Typography variant="caption" color="text.secondary">{o.code} · {o.stir ?? "—"} · {districts.find((d) => d.id === o.district_id)?.name}</Typography></Box></li>}
     renderInput={(p) => <TextField {...p} label={t("ctr_find_customer")} placeholder={t("ctr_find_hint")} />} />;
 }
 
-function CustomerStep({ districts, onPick, fail }: { districts: District[]; onPick: (id: number) => void; fail: (e: unknown) => void }) {
+/** Birinchi qadam: kontragent STIR'i (yoki bazadan qidiruv). Amaldagi shartnoma bo'lsa — qo'shimcha shartnoma taklifi;
+ * bazada yo'q bo'lsa — onNew (rekvizitlar formasi, korxona «Tekshirish»da yaratiladi). Korxona alohida qo'shilmaydi. */
+function CounterpartyStep({ districts, initialStir, onPick, onNew, fail }: { districts: District[]; initialStir?: string;
+  onPick: (id: number) => void; onNew: (stir: string) => void; fail: (e: unknown) => void }) {
   const { t } = useI18n();
-  const [nw, setNw] = useState<{ name: string; district_id: number | "" } | null>(null);
+  const [stir, setStir] = useState(initialStir && /^\d{9}$/.test(initialStir) ? initialStir : "");
   const [busy, setBusy] = useState(false);
-  const create = async () => {
-    if (!nw || nw.name.trim().length < 2 || nw.district_id === "") return;
+  const [active, setActive] = useState<StirLookup | null>(null);
+  const ok = /^\d{9}$/.test(stir);
+  const check = useCallback(async (s: string, pickedId?: number) => {
     setBusy(true);
-    try { const c = await customersApi.create({ name: nw.name.trim(), district_id: nw.district_id }); onPick(c.id); }
-    catch (e) { fail(e); } finally { setBusy(false); }
-  };
+    try {
+      const r = await contractsApi.lookup(s);
+      if (r.customer && r.active_contract) setActive(r);
+      else if (r.customer) onPick(r.customer.id);
+      else if (pickedId) onPick(pickedId);
+      else onNew(s);
+    } catch (e) { fail(e); } finally { setBusy(false); }
+  }, [onPick, onNew, fail]);
+  const auto = useRef(false);
+  useEffect(() => {  // murojaatdan: STIR tayyor — darhol tekshiriladi
+    if (!auto.current && initialStir && /^\d{9}$/.test(initialStir)) { auto.current = true; check(initialStir); }
+  }, [initialStir, check]);
+  const reset = () => { setActive(null); setStir(""); };
   return (
     <Stack spacing={2} id="ctr-customer-step" sx={{ maxWidth: 640, width: "100%", mx: "auto", minHeight: { sm: "40vh" }, justifyContent: "center" }}>
-      <CustomerSearch districts={districts} onPick={onPick} />
+      <Typography variant="body2" color="text.secondary" textAlign="center">{t("cpt_hint")}</Typography>
+      <Stack direction="row" spacing={1.5} component="form" onSubmit={(e) => { e.preventDefault(); if (ok && !busy) check(stir); }}>
+        <TextField id="cp-stir" size="small" label={t("cp_stir")} value={stir} autoFocus sx={{ flex: 1 }}
+          onChange={(e) => setStir(onlyDigits(e.target.value, 9))} inputProps={{ inputMode: "numeric", maxLength: 9 }}
+          helperText={stir && !ok ? t("ctr_digits", { n: "9" }) : " "} error={!!stir && !ok} />
+        <Button id="cp-search" type="submit" variant="contained" disableElevation disabled={!ok || busy} sx={{ alignSelf: "flex-start", height: 40 }}>
+          {t("cp_search")}</Button>
+      </Stack>
       <Divider>{t("ctr_or")}</Divider>
-      {!nw ? <Button id="ctr-new-customer" variant="outlined" onClick={() => setNw({ name: "", district_id: districts.length === 1 ? districts[0].id : "" })}>
-        {t("ctr_new_customer")}</Button>
-        : <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
-          <TextField id="ctr-nc-name" size="small" label={t("cmp_name")} value={nw.name} onChange={(e) => setNw({ ...nw, name: e.target.value })} sx={{ flex: 1 }} />
-          <TextField id="ctr-nc-district" select size="small" label={t("district")} value={nw.district_id} sx={{ minWidth: 200 }}
-            onChange={(e) => setNw({ ...nw, district_id: Number(e.target.value) })}>
-            {districts.filter((d) => d.is_active).map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
-          </TextField>
-          <Button id="ctr-nc-create" variant="contained" disableElevation disabled={busy || nw.name.trim().length < 2 || nw.district_id === ""} onClick={create}>
-            {t("ctr_continue")}</Button>
-        </Stack>}
+      <CustomerSearch districts={districts} onPick={(id, s) => (s ? check(s, id) : onPick(id))} />
+      {active?.customer && active.active_contract && <Dialog open onClose={reset} maxWidth="xs" fullWidth id="cp-active-dialog">
+        <DialogTitle sx={{ fontWeight: 700 }}>{t("cp_active_title")}</DialogTitle>
+        <DialogContent><Typography>{t("cp_active_text", { name: active.customer.name, number: active.active_contract.number,
+          to: active.active_contract.valid_to })}</Typography></DialogContent>
+        <DialogActions>
+          <Button id="cp-active-no" onClick={reset}>{t("cp_no")}</Button>
+          <Button id="cp-active-yes" variant="contained" disableElevation onClick={() => { toast(t("cp_amend_soon"), "info"); reset(); }}>{t("cp_yes")}</Button>
+        </DialogActions>
+      </Dialog>}
     </Stack>
   );
 }

@@ -61,7 +61,7 @@ Muhim: testlar SQLite'da ishlaydi — MySQL'ga xos xatolar ko'rinmaydi. Baza/dra
 
 ## Kod konvensiyalari
 
-- **Migratsiyalar:** `backend/alembic/versions/NNNN_nom.py`, ketma-ket raqam (oxirgisi `0020_customer_location_source`, keyingisi `0021_...`). SQLite uchun `batch_alter_table` ishlatiladi.
+- **Migratsiyalar:** `backend/alembic/versions/NNNN_nom.py`, ketma-ket raqam (oxirgisi `0021_appeal_contract`, keyingisi `0022_...`). SQLite uchun `batch_alter_table` ishlatiladi.
 - **Huquqlar:** `backend/app/core/permissions.py` — modul/amal katalogi va rol shablonlari (`apply_template`); tekshiruv `actor.can("modul.amal")`, frontendda `useCan`.
 - **i18n:** `frontend/src/i18n/messages.ts`, har kalit `[uz, ru, en]`. Yangi kalitlar `"  // backend xato kodlari\n"` markeridan oldinga qo'shiladi.
 - **Xatolar:** backend mashina o'qiydigan xato kodlari qaytaradi (masalan `reason_required`), frontend ularni i18n orqali ko'rsatadi.
@@ -71,6 +71,7 @@ Muhim: testlar SQLite'da ishlaydi — MySQL'ga xos xatolar ko'rinmaydi. Baza/dra
 ## Muhim biznes qoidalari
 
 - Shartnoma holatlari: draft → signed → approved / returned; `deleted` — arxiv (tugallanmagan shartnoma izoh bilan o'chiriladi, raqami bo'shatiladi, `archived_number`da saqlanadi).
+- **Korxona = shartnoma kontragenti (qaror 2026-11-10):** korxona alohida yaratilmaydi — shartnoma ustasi STIR bilan boshlanadi (bazada bo'lsa o'sha korxona; amaldagi shartnomasi bo'lsa — qo'shimcha shartnoma taklifi; yo'q bo'lsa — rekvizitlardan yangi korxona, `/contracts/counterparty`). Joylashuv (koordinata, geofence, kadastr) ixtiyoriy, uni GPS oynasi to'ldiradi. Yangi korxona qo'ng'irog'i korxona yaratmaydi — murojaat legal'da «Yangi shartnomaga yo'naltirilgan», shartnoma raqam olganda yopiladi (`appeals.contract_id`).
 - `source`: flow / manual / import. Mavjud (manual/import) shartnomada qo'lda narx faqat `customers.existing_price` huquqi bilan va tarifdan farq qilsa — sabab majburiy.
 - Hisob-kitob (billing): flow shartnomalar buyurtma varaqasi yopilgan kundagi **tarif** bo'yicha. **Qaror (2026-11-06):** mavjud (manual/import) shartnomalar muddati (`valid_to`) tugaguncha shartnomadagi **eski (qo'lda) narx** bo'yicha hisoblanadi — 3-bosqich PR'ida amalga oshiriladi.
 

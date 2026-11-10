@@ -560,6 +560,7 @@ class AppealOut(ORM):
     reject_reason: str | None
     customer_id: int | None
     request_id: int | None
+    contract_id: int | None = None
     created_at: datetime
 
 

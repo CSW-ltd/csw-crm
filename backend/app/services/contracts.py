@@ -20,8 +20,8 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.core.errors import AppError, conflict, invalid, not_found
 from app.db.base import utcnow
-from app.models import Contract, ContractEvent, Customer, District, Provider, User
-from app.models.enums import ContractType, LocationStatus
+from app.models import Appeal, Contract, ContractEvent, Customer, District, Provider, User
+from app.models.enums import AppealStatus, ContractType, LocationStatus
 from app.services import access, billing, contract_templates, tariffs
 from app.services.geo import coords_error
 from app.services.billing import local_day
@@ -50,7 +50,7 @@ class Requisites(BaseModel):
     oked: str | None = Field(None, max_length=10)
     cadastre: str | None = Field(None, max_length=40)
     is_rented: bool = False  # obyekt ijarada (shartnoma 10.3-bandi)
-    # Obyekt koordinatasi (majburiy): yurist kiritsa — «kutilmoqda», haydovchi tashrifi yoki manager tasdiqlaydi
+    # Obyekt koordinatasi (ixtiyoriy — joylashuvni GPS oynasi to'ldiradi): yurist kiritsa — «kutilmoqda», tashrif yoki manager tasdiqlaydi
     lat: float | None = Field(None, ge=-90, le=90)
     lng: float | None = Field(None, ge=-180, le=180)
 
@@ -212,8 +212,8 @@ async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id:
             errs.append(_err("valid_from", "overlap"))
     if not (body.place or "").strip():
         errs.append(_err("place", "required"))
-    if code := coords_error(r.lat, r.lng):
-        errs.append(_err("coords", code))
+    if (r.lat is not None or r.lng is not None) and (code := coords_error(r.lat, r.lng)):
+        errs.append(_err("coords", code))  # ixtiyoriy, lekin kiritilsa — to'g'ri bo'lsin
     return cust, errs
 
 
@@ -295,6 +295,8 @@ async def create(db: AsyncSession, actor: User, body: ContractDraftIn) -> Contra
     _apply(cust, ct, body)
     _event(ct, actor, "created")
     db.add(ct)
+    await db.flush()
+    await _close_appeals(db, ct, actor)
     await db.commit()
     return await get(db, actor, ct.id)
 
@@ -380,27 +382,86 @@ async def update(db: AsyncSession, actor: User, contract_id: int, body: Contract
     if not ct.number:  # tugallanmagan loyiha — raqam tekshiruvdan o'tgach beriladi
         prov = await _provider(db, cust.district_id)
         ct.number = await next_number(db, prov.code if prov else "SH", body.valid_from.year)
+        await _close_appeals(db, ct, actor)
     _event(ct, actor, "edited")
     log(db, ct, cust, actor, "act_contract_saved", f"Shartnoma ma'lumotlari saqlandi: {ct.display_number} «{cust.name}»" + _price_note(ct))
     await db.commit()
     return await get(db, actor, ct.id)
 
 
-async def start(db: AsyncSession, actor: User, customer_id: int) -> Contract:
-    """Usta: korxona tanlangan zahoti tugallanmagan loyiha (raqamsiz) — «Tugallanmagan shartnomalar»da qoladi."""
+async def start(db: AsyncSession, actor: User, customer_id: int, appeal_id: int | None = None) -> Contract:
+    """Usta: korxona tanlangan zahoti tugallanmagan loyiha (raqamsiz) — «Tugallanmagan shartnomalar»da qoladi.
+    appeal_id — yangi korxona murojaatidan boshlangan shartnoma (raqam olganda murojaat yopiladi)."""
     cust = await db.get(Customer, customer_id)
     if not cust:
         raise not_found("customer")
     access.check_scope(actor, cust.district_id)
+    appeal = None
+    if appeal_id:
+        appeal = await db.get(Appeal, appeal_id, with_for_update=True)
+        if not appeal:
+            raise not_found("appeal")
+        access.check_scope(actor, appeal.district_id)
+        if appeal.status != AppealStatus.new:
+            raise conflict("appeal_not_new", "Bu murojaat allaqachon ko'rib chiqilgan")
     today = local_day(utcnow())
     ct = Contract(customer_id=cust.id, number=None, status="draft", is_active=False, created_by_id=actor.id, events=[],
                   type=ContractType.by_volume, valid_from=today, valid_to=date(today.year, 12, 31))
     _event(ct, actor, "created")
     db.add(ct)
     await db.flush()
+    if appeal:
+        appeal.contract_id, appeal.customer_id = ct.id, cust.id
     log(db, ct, cust, actor, "act_contract_started", f"Yangi shartnoma boshlandi: «{cust.name}»")
     await db.commit()
     return await get(db, actor, ct.id)
+
+
+async def _close_appeals(db: AsyncSession, ct: Contract, actor: User) -> None:
+    """Shartnoma raqam oldi — undan boshlangan yangi korxona murojaati yopiladi."""
+    rows = (await db.execute(select(Appeal).where(Appeal.contract_id == ct.id, Appeal.status == AppealStatus.new))).scalars()
+    for a in rows:
+        a.status, a.reviewed_by_id, a.reviewed_at, a.customer_id = AppealStatus.accepted, actor.id, utcnow(), ct.customer_id
+
+
+async def active_contract(db: AsyncSession, customer_id: int) -> Contract | None:
+    """Amaldagi shartnoma: faol holat va muddati tugamagan (eng kech tugaydigani)."""
+    q = (select(Contract).where(Contract.customer_id == customer_id, Contract.status.in_(LIVE), Contract.is_active.is_(True),
+                                Contract.valid_to >= local_day(utcnow()))
+         .order_by(Contract.valid_to.desc()).limit(1))
+    return (await db.execute(q)).scalar_one_or_none()
+
+
+async def lookup(db: AsyncSession, actor: User, stir: str) -> dict:
+    """Usta birinchi qadami: STIR bo'yicha korxona va uning amaldagi shartnomasi (bo'lsa — qo'shimcha shartnoma taklifi).
+    Keyinchalik: bazada yo'q bo'lsa — soliq bazasidan rekvizitlar (CLAUDE.md, kechiktirilgan STIR ishi)."""
+    from app.repositories import customers as cust_repo
+    cust = await cust_repo.by_stir(db, stir)
+    if not cust:
+        return {"customer": None, "active_contract": None}
+    access.check_scope(actor, cust.district_id)
+    act = await active_contract(db, cust.id)
+    return {"customer": {"id": cust.id, "name": cust.name, "district_id": cust.district_id, "code": cust.code},
+            "active_contract": {"id": act.id, "number": act.display_number, "valid_from": act.valid_from, "valid_to": act.valid_to} if act else None}
+
+
+class CounterpartyIn(BaseModel):
+    stir: str = Field(pattern=r"^\d{9}$")
+    name: str = Field(min_length=2, max_length=200)
+    district_id: int
+    phone: str | None = Field(None, max_length=30)
+
+
+async def counterparty(db: AsyncSession, actor: User, body: CounterpartyIn) -> Customer:
+    """Korxona = shartnoma kontragenti: STIR bazada bo'lsa — o'sha korxona, aks holda rekvizitlardan yangisi (joylashuv — GPS oynasida)."""
+    from app.repositories import customers as cust_repo
+    from app.schemas import CustomerIn
+    from app.services import customer_service
+    cust = await cust_repo.by_stir(db, body.stir)
+    if cust:
+        access.check_scope(actor, cust.district_id)
+        return cust
+    return await customer_service.create(db, CustomerIn(name=body.name, district_id=body.district_id, stir=body.stir, phone=body.phone), actor)
 
 
 async def save_draft(db: AsyncSession, actor: User, contract_id: int, body: ContractDraftIn) -> Contract:

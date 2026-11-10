@@ -381,6 +381,8 @@ class Appeal(TimestampMixin, Base):
     reject_reason: Mapped[str | None] = mapped_column(String(500))
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
     request_id: Mapped[int | None] = mapped_column(ForeignKey("requests.id"))
+    # Yangi korxona: yurist shu murojaatdan shartnoma boshladi; shartnoma raqam olganda murojaat yopiladi
+    contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id"))
 
 
 class WorkSchedule(TimestampMixin, Base):

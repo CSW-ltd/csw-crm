@@ -1,7 +1,7 @@
 import { api } from "./client";
 import { clearTokens, saveTokens, type Tokens } from "@/lib/session";
 import { closeSocket } from "@/lib/socket";
-import type { ContractCheck, ContractDraft, ContractItem, ExistingImportResult, TariffOverview, InvoiceItem, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
+import type { ContractCheck, ContractDraft, ContractItem, StirLookup, ExistingImportResult, TariffOverview, InvoiceItem, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
   ImportBatch, ImportResult, LocationStatus, Region, Role, SituationEvent, SituationLevel, User } from "@/types";
 
 export const gpsApi = {
@@ -226,7 +226,12 @@ export const providersApi = {
 export const contractsApi = {
   check: (body: ContractDraft, id?: number) => api.post<ContractCheck>(id ? `/contracts/${id}/check` : "/contracts/check", body).then((r) => r.data),
   create: (body: ContractDraft) => api.post<ContractItem>("/contracts", body).then((r) => r.data),
-  start: (customer_id: number) => api.post<ContractItem>("/contracts/start", { customer_id }).then((r) => r.data),
+  start: (customer_id: number, appeal_id?: number) => api.post<ContractItem>("/contracts/start", { customer_id, appeal_id: appeal_id ?? null }).then((r) => r.data),
+  /** STIR bo'yicha korxona va amaldagi shartnoma (bo'lsa — qo'shimcha shartnoma taklifi). */
+  lookup: (stir: string) => api.get<StirLookup>("/contracts/lookup", { params: { stir } }).then((r) => r.data),
+  /** Kontragent → korxona: STIR bazada bo'lsa o'sha, aks holda yangi korxona. */
+  counterparty: (body: { stir: string; name: string; district_id: number; phone?: string | null }) =>
+    api.post<{ id: number; name: string; district_id: number; code: string }>("/contracts/counterparty", body).then((r) => r.data),
   saveDraft: (id: number, body: ContractDraft) => api.put<ContractItem>(`/contracts/${id}/draft`, body).then((r) => r.data),
   createExisting: (body: ContractDraft) => api.post<ContractItem>("/contracts/existing", body).then((r) => r.data),
   existingTemplate: () => api.get<Blob>("/contracts/existing/template", { responseType: "blob" }).then((r) => r.data),
