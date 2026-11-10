@@ -256,16 +256,17 @@ export const contractsApi = {
   document: (id: number, format: "pdf" | "docx") =>
     api.get<Blob>(`/contracts/${id}/document`, { params: { format }, responseType: "blob", timeout: 60_000 }).then((r) => r.data),
   scan: (id: number) => api.get<Blob>(`/contracts/${id}/scan`, { responseType: "blob" }).then((r) => r.data),
-  sign: (id: number, body: { signed_on: string; sign_method: string; platform?: string; platform_id?: string; file?: File | null }) => {
+  /** Legal: buxgalter tasdig'iga yuborish (qog'oz — sana va skan majburiy). */
+  sign: (id: number, body: { signed_on?: string; sign_method: string; file?: File | null }) => {
     const fd = new FormData();
-    fd.append("signed_on", body.signed_on);
+    if (body.signed_on) fd.append("signed_on", body.signed_on);
     fd.append("sign_method", body.sign_method);
-    if (body.platform) fd.append("platform", body.platform);
-    if (body.platform_id) fd.append("platform_id", body.platform_id);
     if (body.file) fd.append("file", body.file, body.file.name);
     return api.post<ContractItem>(`/contracts/${id}/sign`, fd, { timeout: 60_000 }).then((r) => r.data);
   },
-  approve: (id: number) => api.post<ContractItem>(`/contracts/${id}/approve`).then((r) => r.data),
+  /** Buxgalter: imzolanganini tasdiqlash (elektron — platforma, ID, kontragent imzolagan sana). */
+  approve: (id: number, body?: { platform?: string; platform_id?: string; signed_on?: string }) =>
+    api.post<ContractItem>(`/contracts/${id}/approve`, body ?? {}).then((r) => r.data),
   returnBack: (id: number, comment: string) => api.post<ContractItem>(`/contracts/${id}/return`, { comment }).then((r) => r.data),
 };
 

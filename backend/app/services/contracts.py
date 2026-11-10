@@ -129,7 +129,8 @@ def _err(field: str, code: str) -> dict:
 
 
 async def _overlap(db: AsyncSession, customer_id: int, vf: date, vt: date, own_id: int | None) -> Contract | None:
-    q = select(Contract).where(Contract.customer_id == customer_id, Contract.status.in_(LIVE), Contract.is_active.is_(True),
+    # Buxgalter tasdig'ini kutayotgani ham (hali faol emas) — ustma-ust shartnoma bo'lmasin
+    q = select(Contract).where(Contract.customer_id == customer_id, Contract.status.in_(LIVE),
                                Contract.valid_from <= vt, Contract.valid_to >= vf)
     if own_id:
         q = q.where(Contract.id != own_id)
@@ -569,35 +570,37 @@ async def delete_draft(db: AsyncSession, actor: User, contract_id: int, reason: 
     await situation.commit(db)
 
 
-async def sign(db: AsyncSession, storage: Storage, actor: User, contract_id: int, signed_on: date, method: str,
+async def sign(db: AsyncSession, storage: Storage, actor: User, contract_id: int, signed_on: date | None, method: str,
                platform: str | None, platform_id: str | None, file: tuple[bytes, str, str] | None) -> Contract:
+    """Legal: imzo usulini belgilab buxgalterga yuboradi («Tasdiq kutilmoqda»). Imzolanganini FAQAT buxgalter tasdiqlaydi:
+    elektron — Didox'da imzolangach platforma ID bilan; qog'oz — legal yuklagan skan (PDF) bo'yicha. Tasdiqqacha faol emas.
+    platform/platform_id legal'dan qabul qilinmaydi (eski mijozlar uchun parametrlar qoldi)."""
     ct = await _own(db, actor, contract_id, lock=True)
     if ct.status not in ("draft", "returned"):
-        raise conflict("contract_locked", "Shartnoma allaqachon imzolangan")
+        raise conflict("contract_locked", "Shartnoma allaqachon buxgalterga yuborilgan")
     if not ct.number or ct.draft_data:
         raise conflict("contract_incomplete", "Avval ma'lumotlarni tekshirib, saqlang")
     if method not in ("electronic", "paper"):
         raise invalid("bad_sign_method", "Imzo usuli: elektron yoki qog'oz")
-    if signed_on > local_day(utcnow()):
+    if signed_on and signed_on > local_day(utcnow()):
         raise invalid("bad_dates", "Imzolangan sana kelajakda bo'lmasin")
-    pid = (platform_id or "").strip() or None
-    if method == "electronic":
-        if platform not in PLATFORMS or not pid:
-            raise invalid("platform_required", "Elektron imzoda platforma va hujjat ID kiritiladi")
-        dup = (await db.execute(select(Contract.id).where(Contract.platform_id == pid, Contract.id != ct.id))).first()
-        if dup:
-            raise conflict("platform_id_taken", "Bu platforma ID boshqa shartnomada bor")
-    if method == "paper" and not file and not ct.scan_key:
-        # Qog'ozda: imzolangan nusxaning skani (PDF) yuklanmaguncha «Tugallanmagan»da qoladi
-        raise invalid("scan_required_paper", "Qog'ozda imzolangan shartnomaning skanini (PDF) yuklang")
+    if method == "paper":
+        if not signed_on:
+            raise invalid("signed_on_required", "Qog'ozda imzolangan sanani kiriting")
+        if not file and not ct.scan_key:
+            raise invalid("scan_required_paper", "Qog'ozda imzolangan shartnomaning skanini (PDF) yuklang")
     if file:
         await _put_scan(storage, ct, file)
     was_returned = ct.status == "returned"
-    ct.status, ct.is_active, ct.signed_on, ct.sign_method = "signed", True, signed_on, method
-    ct.platform, ct.platform_id = (platform if method == "electronic" else None), (pid if method == "electronic" else None)
+    manual = ct.source in ("manual", "import")
+    ct.status, ct.sign_method = "signed", method
+    ct.is_active = manual  # yangi shartnoma — faqat buxgalter tasdig'idan keyin faol (murojaat, GPS)
+    ct.signed_on = signed_on if method == "paper" else None  # elektron — sanani buxgalter kiritadi
+    if not manual:
+        ct.platform = ct.platform_id = None
     ct.signed_at, ct.return_comment = utcnow(), None
     _event(ct, actor, "resubmitted" if was_returned else "signed")
-    log(db, ct, ct.customer, actor, "act_contract_signed", f"Shartnoma imzolandi, buxgalteriyaga yuborildi: {ct.display_number} «{ct.customer.name}»"
+    log(db, ct, ct.customer, actor, "act_contract_signed", f"Shartnoma buxgalter tasdig'iga yuborildi: {ct.display_number} «{ct.customer.name}»"
         + (" (qayta)" if was_returned else ""))
     await db.commit()
     return await get(db, actor, ct.id)
@@ -624,10 +627,33 @@ async def attach_scan(db: AsyncSession, storage: Storage, actor: User, contract_
     return await get(db, actor, ct.id)
 
 
-async def approve(db: AsyncSession, actor: User, contract_id: int) -> Contract:
+class ApproveIn(BaseModel):
+    """Buxgalter tasdig'i: elektron shartnomada — platforma, hujjat ID va kontragent imzolagan sana."""
+    platform: str | None = Field(None, pattern="^(didox|hujjat|soliq|other)$")
+    platform_id: str | None = Field(None, max_length=40)
+    signed_on: date | None = None
+
+
+async def approve(db: AsyncSession, actor: User, contract_id: int, body: ApproveIn | None = None) -> Contract:
+    """Imzolanganini faqat buxgalter tasdiqlaydi → «Tasdiqlandi», faol (murojaat, GPS) va hisob-kitobga kiradi."""
+    body = body or ApproveIn()
     ct = await _own(db, actor, contract_id, lock=True)
     if ct.status != "signed":
         raise conflict("contract_not_signed", "Faqat imzolangan (tasdiq kutayotgan) shartnoma tasdiqlanadi")
+    if body.signed_on and body.signed_on > local_day(utcnow()):
+        raise invalid("bad_dates", "Imzolangan sana kelajakda bo'lmasin")
+    pid = (body.platform_id or "").strip() or None
+    if ct.sign_method == "electronic" and ct.source not in ("manual", "import"):
+        if not body.platform or not pid:
+            raise invalid("platform_required", "Elektron shartnomada platforma va hujjat ID kiritiladi")
+    if pid:
+        dup = (await db.execute(select(Contract.id).where(Contract.platform_id == pid, Contract.id != ct.id))).first()
+        if dup:
+            raise conflict("platform_id_taken", "Bu platforma ID boshqa shartnomada bor")
+        ct.platform, ct.platform_id = body.platform or ct.platform or "other", pid
+    if body.signed_on or not ct.signed_on:
+        ct.signed_on = body.signed_on or local_day(utcnow())
+    ct.is_active = True
     ct.status, ct.approved_at, ct.approved_by_id = "approved", utcnow(), actor.id
     _event(ct, actor, "approved")
     log(db, ct, ct.customer, actor, "act_contract_approved", f"Buxgalter tasdiqladi: {ct.display_number} «{ct.customer.name}»")

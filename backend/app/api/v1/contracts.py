@@ -153,10 +153,10 @@ async def document(contract_id: int, format: str = Query("pdf", pattern="^(pdf|d
 
 
 @router.post("/{contract_id}/sign")
-async def sign(contract_id: int, signed_on: date = Form(...), sign_method: str = Form(...), platform: str | None = Form(None),
+async def sign(contract_id: int, signed_on: date | None = Form(None), sign_method: str = Form(...), platform: str | None = Form(None),
                platform_id: str | None = Form(None, max_length=40), file: UploadFile | None = File(None), user: User = Legal,
                db: AsyncSession = DB, storage: Storage = Depends(get_storage)) -> dict:
-    """«Imzolandi — buxgalteriyaga yuborish». Shu paytdan shartnoma faol (murojaat ochiladi), hisob-kitob — buxgalter tasdig'idan keyin."""
+    """«Buxgalterga yuborish»: imzo usuli (qog'oz — skan PDF va sana). Imzolanganini faqat buxgalter tasdiqlaydi; tasdiqqacha faol emas."""
     f = (await file.read(), file.content_type or "", file.filename or "") if file and file.filename else None
     return svc.out(await svc.sign(db, storage, user, contract_id, signed_on, sign_method, platform, platform_id, f), with_events=True)
 
@@ -172,8 +172,8 @@ class ReturnIn(BaseModel):
 
 
 @router.post("/{contract_id}/approve")
-async def approve(contract_id: int, user: User = Accountant, db: AsyncSession = DB) -> dict:
-    return svc.out(await svc.approve(db, user, contract_id), with_events=True)
+async def approve(contract_id: int, body: svc.ApproveIn | None = None, user: User = Accountant, db: AsyncSession = DB) -> dict:
+    return svc.out(await svc.approve(db, user, contract_id, body), with_events=True)
 
 
 @router.post("/{contract_id}/return")

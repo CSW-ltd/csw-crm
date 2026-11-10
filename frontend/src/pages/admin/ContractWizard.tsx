@@ -510,8 +510,7 @@ function DocStep({ ct, busy, setBusy, fail, onSigned, onDeleted }: { ct: Contrac
   fail: (e: unknown) => void; onSigned: (c: ContractItem) => void; onDeleted: () => void }) {
   const { t } = useI18n();
   const [url, setUrl] = useState<string | null>(null);
-  const [sign, setSign] = useState({ signed_on: todayIso(), sign_method: ct.sign_method ?? "electronic", platform: ct.platform ?? "didox",
-    platform_id: ct.platform_id ?? "" });
+  const [sign, setSign] = useState({ signed_on: todayIso(), sign_method: ct.sign_method ?? "electronic" });
   const [file, setFile] = useState<File | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -524,8 +523,8 @@ function DocStep({ ct, busy, setBusy, fail, onSigned, onDeleted }: { ct: Contrac
   const submit = async () => {
     setBusy(true);
     try {
-      onSigned(await contractsApi.sign(ct.id, { signed_on: sign.signed_on, sign_method: sign.sign_method,
-        platform: electronic ? sign.platform : undefined, platform_id: electronic ? sign.platform_id.trim() : undefined, file }));
+      onSigned(await contractsApi.sign(ct.id, { sign_method: sign.sign_method, signed_on: electronic ? undefined : sign.signed_on,
+        file: electronic ? null : file }));
     } catch (e) { fail(e); } finally { setBusy(false); }
   };
   const [askDelete, setAskDelete] = useState(false);
@@ -548,7 +547,7 @@ function DocStep({ ct, busy, setBusy, fail, onSigned, onDeleted }: { ct: Contrac
           <Button id="ctr-docx" variant="outlined" startIcon={<DescriptionIcon />}
             onClick={() => contractsApi.document(ct.id, "docx").then((b) => saveBlob(b, `${name}.docx`)).catch(fail)}>{t("ctr_word")}</Button>
         </Stack>
-        <Alert severity="info" variant="outlined">{t(ct.sign_method === "paper" ? "ctr_hint_paper" : "ctr_hint_electronic")}</Alert>
+        <Alert severity="info" variant="outlined">{t(sign.sign_method === "paper" ? "ctr_hint_paper" : "ctr_hint_electronic")}</Alert>
         {canSign && <Paper variant="outlined" sx={{ p: 2 }} id="ctr-sign">
           <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>{t("ctr_sign_title")}</Typography>
           <Stack spacing={1.5}>
@@ -556,25 +555,18 @@ function DocStep({ ct, busy, setBusy, fail, onSigned, onDeleted }: { ct: Contrac
               <FormControlLabel value="electronic" control={<Radio size="small" />} label={t("ctr_m_electronic")} />
               <FormControlLabel value="paper" control={<Radio size="small" />} label={t("ctr_m_paper")} />
             </RadioGroup>
-            <TextField size="small" type="date" name="signed_on" label={t("signed_on")} value={sign.signed_on} InputLabelProps={{ shrink: true }}
-              inputProps={{ max: todayIso() }} onChange={(e) => setSign({ ...sign, signed_on: e.target.value })} />
-            {electronic && <>
-              <TextField size="small" select name="platform" label={t("ctr_platform")} value={sign.platform} onChange={(e) => setSign({ ...sign, platform: e.target.value })}>
-                {PLATFORMS.map((p) => <MenuItem key={p} value={p}>{t(`ctr_pl_${p}` as MessageKey)}</MenuItem>)}
-              </TextField>
-              <TextField size="small" name="platform_id" label={t("ctr_platform_id")} value={sign.platform_id} required
-                onChange={(e) => setSign({ ...sign, platform_id: e.target.value })} helperText={t("ctr_platform_id_hint")} />
-            </>}
-            <Box>
+            {!electronic && <TextField size="small" type="date" name="signed_on" label={t("signed_on")} value={sign.signed_on} InputLabelProps={{ shrink: true }}
+              inputProps={{ max: todayIso() }} onChange={(e) => setSign({ ...sign, signed_on: e.target.value })} />}
+            {!electronic && <Box>
               <input ref={fileRef} type="file" hidden accept="application/pdf" id="ctr-file"
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
-              <Button size="small" variant={!electronic && !file ? "outlined" : "text"} color={!electronic && !file ? "warning" : "primary"}
-                onClick={() => fileRef.current?.click()}>{t(electronic ? "ctr_attach_signed" : "ctr_attach_scan_required")}</Button>
+              <Button size="small" variant={!file ? "outlined" : "text"} color={!file ? "warning" : "primary"}
+                onClick={() => fileRef.current?.click()}>{t("ctr_attach_scan_required")}</Button>
               {file && <Chip size="small" color="success" label={file.name} onDelete={() => setFile(null)} sx={{ ml: 1 }} />}
-              {!electronic && !file && <Typography variant="caption" color="warning.main" display="block" sx={{ mt: 0.5 }}>{t("ctr_paper_wait_hint")}</Typography>}
-            </Box>
+              {!file && <Typography variant="caption" color="warning.main" display="block" sx={{ mt: 0.5 }}>{t("ctr_paper_wait_hint")}</Typography>}
+            </Box>}
             <Button id="ctr-signed" variant="contained" disableElevation size="large" startIcon={<DrawIcon />}
-              disabled={busy || !sign.signed_on || (electronic ? !sign.platform_id.trim() : !file && !ct.has_scan)} onClick={submit}
+              disabled={busy || (!electronic && (!sign.signed_on || (!file && !ct.has_scan)))} onClick={submit}
               sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>{t("ctr_signed_send")}</Button>
           </Stack>
         </Paper>}
