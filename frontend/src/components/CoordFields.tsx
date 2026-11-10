@@ -57,10 +57,10 @@ export function CoordFields({ lat, lng, onChange, error, status }: Props) {
       <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} alignItems={{ md: "flex-start" }}>
         <TextField size="small" name="coords_paste" label={t("coords_paste")} value={paste} sx={{ flex: 2 }}
           onChange={(e) => applyPaste(e.target.value)} error={pasteBad} helperText={pasteBad ? t("coords_paste_bad") : t("coords_paste_hint")} />
-        <TextField size="small" name="coords" label={t("coords_lat")} value={la} required error={!!error} sx={{ flex: 1 }}
+        <TextField size="small" name="coords" label={t("coords_lat")} value={la} error={!!error} sx={{ flex: 1 }}
           inputProps={{ inputMode: "decimal" }} helperText={error}
           onChange={(e) => { setLa(e.target.value); onChange(toNum(e.target.value), toNum(ln)); }} />
-        <TextField size="small" name="coords_lng" label={t("coords_lng")} value={ln} required error={!!error} sx={{ flex: 1 }}
+        <TextField size="small" name="coords_lng" label={t("coords_lng")} value={ln} error={!!error} sx={{ flex: 1 }}
           inputProps={{ inputMode: "decimal" }}
           onChange={(e) => { setLn(e.target.value); onChange(toNum(la), toNum(e.target.value)); }} />
         <Button size="small" startIcon={<MapIcon />} disabled={!ok} sx={{ whiteSpace: "nowrap", mt: { md: 0.5 } }}
