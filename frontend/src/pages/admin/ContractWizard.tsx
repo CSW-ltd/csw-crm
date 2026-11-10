@@ -271,7 +271,7 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
             : <CounterpartyStep key={mode} districts={districts} initialStir={appeal?.stir ?? undefined} onPick={pickCustomer} onNew={startNew} fail={fail} />)}
         </Stack>}
         {step === 1 && (customer || pendingStir) && <Stack spacing={2}>
-          {pendingStir && !customer && <Stack spacing={1.5} id="cp-new" sx={{ maxWidth: 640, width: "100%", mx: "auto", py: 1 }}>
+          {pendingStir && !customer && <Stack spacing={1.5} id="cp-new" sx={{ maxWidth: 640, width: "100%", alignSelf: "center", mx: "auto", py: 1 }}>
             <Typography fontWeight={700} textAlign="center">{t("cp_new_title", { stir: pendingStir })}</Typography>
             <Typography variant="body2" color="text.secondary" textAlign="center">{t("cp_new_hint")}</Typography>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
@@ -452,7 +452,7 @@ function CounterpartyStep({ districts, initialStir, onPick, onNew, fail }: { dis
   }, [initialStir, check]);
   const reset = () => { setActive(null); setStir(""); };
   return (
-    <Stack spacing={2} id="ctr-customer-step" sx={{ maxWidth: 640, width: "100%", mx: "auto", minHeight: { sm: "40vh" }, justifyContent: "center" }}>
+    <Stack spacing={2} id="ctr-customer-step" sx={{ maxWidth: 640, width: "100%", alignSelf: "center", mx: "auto", minHeight: { sm: "40vh" }, justifyContent: "center" }}>
       <Typography variant="body2" color="text.secondary" textAlign="center">{t("cpt_hint")}</Typography>
       <Stack direction="row" spacing={1.5} component="form" onSubmit={(e) => { e.preventDefault(); if (ok && !busy) check(stir); }}>
         <TextField id="cp-stir" size="small" label={t("cp_stir")} value={stir} autoFocus sx={{ flex: 1 }}
