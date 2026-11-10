@@ -16,7 +16,7 @@ KIND_UZ = {
     "act_request_created": "Murojaat yaratildi", "act_request_cancelled": "Murojaat bekor qilindi",
     "act_assigned": "Mashina biriktirildi", "act_reassigned": "Qayta biriktirildi", "request_reassigned": "Qayta biriktirildi (ogohlantirish)", "contract_deleted": "Shartnoma o'chirildi", "act_form_printed": "Varaqa chop etildi",
     "act_print_confirmed": "Varaqa printerdan chiqdi", "act_form_closed": "Murojaat varaqa bilan yopildi",
-    "act_act_completed": "Dalolatnoma bilan yakunlandi", "act_contract_started": "Shartnoma boshlandi",
+    "act_act_completed": "Dalolatnoma bilan yakunlandi", "act_contract_started": "Shartnoma boshlandi", "act_contract_request": "Kontragent so'rovi",
     "act_contract_saved": "Shartnoma ma'lumotlari saqlandi", "act_contract_signed": "Shartnoma imzolandi",
     "act_contract_imported": "Mavjud shartnoma kiritildi", "act_contract_import": "Excel'dan shartnomalar kiritildi",
     "act_contract_approved": "Shartnoma tasdiqlandi", "act_contract_returned": "Shartnoma qaytarildi",

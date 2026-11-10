@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Autocomplete, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel, IconButton,
+import { Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel, IconButton,
   MenuItem, Paper, Radio, RadioGroup, Stack, Step, StepLabel, Stepper, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery,
   useTheme } from "@mui/material";
 import CloseIcon from "@mui/icons-material/Close";
@@ -17,7 +17,7 @@ import { MESSAGES } from "@/i18n/messages";
 import { useI18n } from "@/i18n/I18nContext";
 import type { MessageKey } from "@/i18n/messages";
 import { toast } from "@/lib/alerts";
-import type { Appeal, ContractCheck, ContractDraft, ContractItem, ContractType, CustomerListItem, District, Requisites, StirLookup } from "@/types";
+import type { Appeal, ContractCheck, ContractDraft, ContractItem, ContractType, District, Requisites, StirLookup } from "@/types";
 import { fmtMoney } from "./CompaniesTab";
 import { ExistingImport } from "./ExistingContracts";
 
@@ -58,13 +58,15 @@ const ERR_LABEL: Record<string, MessageKey> = { price: "ctr_price", price_reason
   signed_on: "signed_on", platform_id: "ctr_platform_id", type: "contract_type", coords: "coords_title" };
 const ERR_INPUT: Record<string, string> = { number: "ex_number", signed_on: "ex_signed", platform_id: "ex_pid" };
 
-/** «Shartnoma qo'shish»: 1) kontragent (STIR yoki qidiruv; korxona = kontragent) 2) rekvizitlar va shartlar → «Tekshirish» → raqam
- * 3) hujjat (PDF/Word) → «Imzolandi — buxgalteriyaga yuborish». appeal — yangi korxona murojaatidan (raqam olganda murojaat yopiladi). */
+/** «Shartnoma qo'shish»: forma darhol, eng tepada kontragent STIR'i (korxona = kontragent; my.soliq ulanmaguncha rekvizitlar qo'lda).
+ * Yangi shartnoma — faqat bazada yo'q STIR, boshlanish sanasi bugun; STIR shartnomada bor bo'lsa — qo'shimcha shartnoma / filial / manzil so'rovi.
+ * Mavjud shartnoma — STIR'da amaldagi shartnoma bo'lsa rad etiladi. → «Tekshirish» → raqam → hujjat → imzo → buxgalter.
+ * appeal — yangi korxona murojaatidan (raqam olganda murojaat yopiladi). */
 export function ContractWizard({ districts, contractId, appeal, onClose, onDone }: Props) {
   const { t, tErr } = useI18n();
   const theme = useTheme();
   const mobile = useMediaQuery(theme.breakpoints.down("sm"));
-  const [step, setStep] = useState(contractId ? -1 : 0);
+  const [step, setStep] = useState(contractId ? -1 : 1);  // forma darhol (Excel — 0)
   const [ct, setCt] = useState<ContractItem | null>(null);
   const [customer, setCustomer] = useState<{ id: number; name: string; district_id: number } | null>(null);
   const emptyForm = (): Omit<ContractDraft, "customer_id"> => ({ requisites: EMPTY_REQ, type: "by_volume", price: null, annual_volume: null,
@@ -85,7 +87,9 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
   const [exFile, setExFile] = useState<File | null>(null);
   // Bazada yo'q kontragent (STIR topilmadi): korxona birinchi «Tekshirish»da rekvizitlardan yaratiladi
   const [pendingStir, setPendingStir] = useState<string | null>(null);
-  const [stirLock, setStirLock] = useState(false);  // STIR qidiruvdan kelgan — rekvizitlarda o'zgartirilmaydi
+  const [stirLock, setStirLock] = useState(false);  // STIR tekshirilgan — rekvizitlarda o'zgartirilmaydi
+  const [stirInput, setStirInput] = useState("");
+  const [conflict, setConflict] = useState<StirLookup | null>(null);  // STIR shartnomada bor — so'rov dialogi
   const [cpDistrict, setCpDistrict] = useState<number | "">(appeal?.district_id ?? (districts.length === 1 ? districts[0].id : ""));
   const exFileRef = useRef<HTMLInputElement>(null);
   // Korxonaning bazadagi nuqtasi: o'zgarmasa maqom saqlanadi, o'zgarsa — «kutilmoqda»
@@ -97,8 +101,9 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
   const canPrice = can("customers.existing_price");
   const switchMode = (m: Mode) => {  // rejim almashganda forma tozalanadi
     setMode(m); setCustomer(null); setForm(emptyForm()); setEx(EMPTY_EX); setExFile(null); setChecked(null); setTariff(undefined);
-    setOrigLoc(null); setPendingStir(null); setStirLock(false); setCpDistrict(appeal?.district_id ?? (districts.length === 1 ? districts[0].id : ""));
-    setStep(0);
+    setOrigLoc(null); setPendingStir(null); setStirLock(false); setStirInput(""); setConflict(null);
+    setCpDistrict(appeal?.district_id ?? (districts.length === 1 ? districts[0].id : ""));
+    setStep(m === "excel" ? 0 : 1);
   };
   /** STIR bazada yo'q — rekvizitlar formasi: STIR qulflangan, nom/telefon murojaatdan (bo'lsa). */
   const startNew = (stir: string) => {
@@ -106,9 +111,27 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
     setPendingStir(stir); setStirLock(true); setCustomer(null); setOrigLoc(null); setChecked(null);
     setForm((f) => ({ ...f, place: f.place || (cpDistrict !== "" ? districtName(cpDistrict) : ""),
       sign_method: mode === "existing" ? "paper" : f.sign_method,
-      requisites: { ...EMPTY_REQ, stir, name, phone: appeal?.caller_phone ?? "" } }));
-    setStep(1);
+      requisites: { ...f.requisites, stir, name: f.requisites.name || name, phone: f.requisites.phone || (appeal?.caller_phone ?? "") } }));
   };
+  /** STIR 9 raqam bo'ldi — bazadan tekshiruv (keyinchalik: my.soliq'dan rekvizitlar). */
+  const onStir = async (stir: string) => {
+    setBusy(true);
+    try {
+      const r = await contractsApi.lookup(stir);
+      if (mode === "existing") {
+        if (r.active_contract) { toast(t("cp_exists_active", { n: r.active_contract.number }), "error"); setStirInput(""); return; }
+        if (r.customer) await pickCustomer(r.customer.id); else startNew(stir);
+        return;
+      }
+      if (r.last_contract) { setConflict(r); return; }       // yangi shartnoma — faqat bazada yo'q kontragent
+      if (r.customer) await pickCustomer(r.customer.id); else startNew(stir);  // shartnomasiz korxona (masalan, tashlab ketilgan loyiha)
+    } catch (e) { fail(e); } finally { setBusy(false); }
+  };
+  const auto = useRef(false);
+  useEffect(() => {  // murojaatdan: STIR tayyor — darhol tekshiriladi
+    if (!auto.current && !contractId && appeal?.stir && /^\d{9}$/.test(appeal.stir)) { auto.current = true; setStirInput(appeal.stir); onStir(appeal.stir); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const fromCustomer = (c: Partial<Requisites> & { name: string }) => ({ ...EMPTY_REQ, ...Object.fromEntries(Object.entries(c)
     .filter(([k]) => k in EMPTY_REQ).map(([k, v]) => [k, k === "is_rented" ? !!v : k === "lat" || k === "lng" ? v ?? null : v ?? ""])) } as Requisites);
   const fromContract = useCallback((c: ContractItem) => {
@@ -176,7 +199,8 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
   const ensureCustomer = async (): Promise<{ cid: number; ctId?: number } | null> => {
     if (customer) return { cid: customer.id, ctId: ct?.id };
     const name = form.requisites.name.trim();
-    if (name.length < 2 || cpDistrict === "" || !pendingStir) { toast(t("ex_need_name_district"), "error"); return null; }
+    if (!pendingStir) { toast(t("cp_need_stir"), "error"); return null; }
+    if (name.length < 2 || cpDistrict === "") { toast(t("ex_need_name_district"), "error"); return null; }
     const c = await contractsApi.counterparty({ stir: pendingStir, name, district_id: cpDistrict, phone: form.requisites.phone || null });
     setCustomer({ id: c.id, name: c.name, district_id: c.district_id });
     setOrigLoc({ lat: null, lng: null });
@@ -243,7 +267,7 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
     return e ? t(`ce_${e.code}` as MessageKey) : hint ? t("ctr_digits", { n: hint }) : undefined;
   };
 
-  const steps = [t("ctr_step_customer"), t("ctr_step_data"), t("ctr_step_doc")];
+  const steps = [t("ctr_step_data"), t("ctr_step_doc")];
   return (
     <Dialog open onClose={() => !busy && close()} fullWidth maxWidth="lg" fullScreen={mobile} id="contract-wizard" data-mode={vmode}
       PaperProps={{ sx: { borderTop: 8, borderTopColor: MODE_COLOR[vmode] } }}>
@@ -257,24 +281,27 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
           borderRadius: 1, bgcolor: "action.hover" }}>
           <Typography variant="body2" color="text.secondary">{t(`ctr_mode_banner_${vmode}` as MessageKey)}</Typography>
         </Box>}
-        {step >= 0 && mode !== "excel" && <Stepper activeStep={step} alternativeLabel sx={{ mb: 2.5 }}>{steps.map((s) => <Step key={s}><StepLabel>{s}</StepLabel></Step>)}</Stepper>}
+        {step >= 1 && mode !== "excel" && <Stepper activeStep={step - 1} alternativeLabel sx={{ mb: 2.5 }}>{steps.map((s) => <Step key={s}><StepLabel>{s}</StepLabel></Step>)}</Stepper>}
         {ct?.status === "returned" && ct.return_comment && <Alert severity="error" sx={{ mb: 2 }} id="ctr-returned">
           <b>{t("ctr_returned_by")}</b> {ct.return_comment}</Alert>}
-        {!ct && !contractId && step === 0 && <Stack spacing={2}>
+        {!ct && !contractId && !customer && <Stack spacing={2} sx={{ mb: 2 }}>
           <ToggleButtonGroup exclusive fullWidth value={mode} onChange={(_, v) => { if (v && v !== mode) switchMode(v); }} id="ctr-mode"
             sx={{ flexWrap: { xs: "wrap", sm: "nowrap" } }}>
             {(["new", "existing", "excel"] as const).map((m) => <ToggleButton key={m} value={m} data-mode={m} sx={{ fontWeight: 700, borderTop: 4,
               borderTopColor: `${MODE_COLOR[m]} !important`, "&.Mui-selected, &.Mui-selected:hover": { bgcolor: MODE_COLOR[m], color: "#fff" } }}>
               {t(`ctr_mode_${m}` as MessageKey)}</ToggleButton>)}
           </ToggleButtonGroup>
-          {step === 0 && (mode === "excel" ? <ExistingImport fail={fail} onDone={() => { changed(); }} />
-            : <CounterpartyStep key={mode} districts={districts} initialStir={appeal?.stir ?? undefined} onPick={pickCustomer} onNew={startNew} fail={fail} />)}
+          {mode === "excel" && <ExistingImport fail={fail} onDone={() => { changed(); }} />}
         </Stack>}
-        {step === 1 && (customer || pendingStir) && <Stack spacing={2}>
-          {pendingStir && !customer && <Stack spacing={1.5} id="cp-new" sx={{ maxWidth: 640, width: "100%", alignSelf: "center", mx: "auto", py: 1 }}>
-            <Typography fontWeight={700} textAlign="center">{t("cp_new_title", { stir: pendingStir })}</Typography>
-            <Typography variant="body2" color="text.secondary" textAlign="center">{t("cp_new_hint")}</Typography>
-            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+        {step === 1 && mode !== "excel" && <Stack spacing={2}>
+          {!customer && <Stack spacing={1.5} id="cp-stir-block" sx={{ maxWidth: 640, width: "100%", alignSelf: "center", mx: "auto" }}>
+            <TextField id="cp-stir" label={t("cp_stir")} value={stirInput} autoFocus disabled={busy} required
+              onChange={(e) => { const v = onlyDigits(e.target.value, 9); setStirInput(v); setChecked(null);
+                if (pendingStir && v !== pendingStir) { setPendingStir(null); setStirLock(false); }
+                if (v.length === 9 && v !== pendingStir) onStir(v); }}
+              inputProps={{ inputMode: "numeric", maxLength: 9 }} helperText={stirInput && stirInput.length < 9 ? t("ctr_digits", { n: "9" }) : " "} />
+            {pendingStir && <Alert severity="info" id="cp-soliq">{t("cp_soliq_wait")}</Alert>}
+            {pendingStir && <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
               <TextField id="cp-name" size="small" name="name" label={t("ctr_f_name")} value={form.requisites.name} sx={{ flex: 1 }}
                 onChange={(e) => setReq("name", e.target.value)} />
               <TextField id="cp-district" select size="small" label={t("district")} value={cpDistrict} sx={{ minWidth: 200 }}
@@ -282,8 +309,7 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
                   setForm((f) => ({ ...f, place: f.place || districtName(d) })); }}>
                 {districts.filter((d) => d.is_active).map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}
               </TextField>
-            </Stack>
-            <Button size="small" onClick={() => { setPendingStir(null); setStep(0); }} sx={{ alignSelf: "center" }}>{t("cp_search")}…</Button>
+            </Stack>}
           </Stack>}
           {checked && !checked.ok && <Alert severity="error" id="ctr-errors" ref={errBox} sx={{ scrollMarginTop: 16 }}>
             <Typography fontWeight={700}>{t("ctr_errors_title", { n: checked.errors.length })}</Typography>
@@ -295,7 +321,7 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
           </Alert>}
           <Typography variant="subtitle2" color="text.secondary">{t("ctr_requisites")}{customer ? ` · ${districtName(customer.district_id)}` : ""}</Typography>
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "1fr", md: "repeat(3, 1fr)" } }}>
-            {REQ_FIELDS.filter((f) => !(f.k === "name" && pendingStir && !customer)).map((f) => f.k === "cadastre"
+            {REQ_FIELDS.filter((f) => customer || (f.k !== "name" && f.k !== "stir")).map((f) => f.k === "cadastre"
               ? <Stack key={f.k} direction="row" spacing={1} alignItems="flex-start">
                 <TextField size="small" name="cadastre" label={`${t("ctr_f_cadastre")} (${t("ctr_optional_short")})`} value={form.requisites.cadastre ?? ""}
                   onChange={(e) => setReq("cadastre", e.target.value)} sx={{ flex: 1 }} />
@@ -337,8 +363,11 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
               error={!!errOf("annual_volume")} helperText={helper("annual_volume")} />
             <TextField size="small" name="place" label={t("ctr_place")} value={form.place} onChange={(e) => set("place", e.target.value)}
               error={!!errOf("place")} helperText={helper("place")} />
-            <TextField size="small" name="valid_from" type="date" label={t("valid_from")} value={form.valid_from} InputLabelProps={{ shrink: true }}
-              onChange={(e) => set("valid_from", e.target.value)} error={!!errOf("valid_from")} helperText={helper("valid_from")} />
+            {manualSrc || ct?.number
+              ? <TextField size="small" name="valid_from" type="date" label={t("valid_from")} value={form.valid_from} InputLabelProps={{ shrink: true }}
+                onChange={(e) => set("valid_from", e.target.value)} error={!!errOf("valid_from")} helperText={helper("valid_from")} />
+              : <TextField size="small" name="valid_from" type="date" label={t("valid_from")} value={todayIso()} InputLabelProps={{ shrink: true }}
+                InputProps={{ readOnly: true }} helperText={t("ctr_start_today")} />}
             <TextField size="small" name="valid_to" type="date" label={t("valid_to")} value={form.valid_to} InputLabelProps={{ shrink: true }}
               onChange={(e) => set("valid_to", e.target.value)} error={!!errOf("valid_to")} helperText={helper("valid_to")} />
             <Box>
@@ -391,6 +420,9 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
           onSigned={(c) => { setCt(c); changed(); toast(t("ctr_signed_ok"), "success"); onDone?.(c); onClose(); }}
           onDeleted={() => { changed(); toast(t("ctr_deleted")); onDone?.(ct); onClose(); }} />}
         {step === -1 && <Typography color="text.secondary">…</Typography>}
+        {conflict && <RequestDialog lookup={conflict} stir={stirInput} fail={fail}
+          onCancel={() => { setConflict(null); setStirInput(""); }}
+          onSent={() => { setConflict(null); changed(); onClose(); }} />}
       </DialogContent>
       <DialogActions sx={{ px: 3, py: 1.5, flexWrap: "wrap", gap: 1 }}>
         {step === 1 && ct && (ct.status === "draft" || ct.status === "returned") &&
@@ -408,71 +440,36 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
   );
 }
 
-/** Bazadan korxona qidirish (nomi, maxsus raqam yoki STIR) — yangi va mavjud shartnoma rejimlarida. */
-function CustomerSearch({ districts, onPick }: { districts: District[]; onPick: (id: number, stir?: string | null) => void }) {
+/** STIR bazadagi shartnomada bor: yangi shartnoma o'rniga so'rov — qo'shimcha shartnoma (buxgalterga), yangi filial yoki
+ * manzilni o'zgartirish (GPS'ga). «Bekor qilish» — forma qaytadi, STIR tozalanadi. */
+function RequestDialog({ lookup, stir, fail, onCancel, onSent }: { lookup: StirLookup; stir: string; fail: (e: unknown) => void;
+  onCancel: () => void; onSent: () => void }) {
   const { t } = useI18n();
-  const [q, setQ] = useState("");
-  const [opts, setOpts] = useState<CustomerListItem[]>([]);
-  useEffect(() => {
-    const h = window.setTimeout(() => {
-      if (q.trim().length < 2) { setOpts([]); return; }
-      customersApi.search({ q: q.trim(), limit: 20 }).then((r) => setOpts(r.items)).catch(() => undefined);
-    }, 300);
-    return () => window.clearTimeout(h);
-  }, [q]);
-  return <Autocomplete id="ctr-customer-search" options={opts} filterOptions={(x) => x} getOptionLabel={(o) => `${o.name}${o.code ? ` · ${o.code}` : ""}${o.stir ? ` · ${o.stir}` : ""}`}
-    onInputChange={(_, v) => setQ(v)} onChange={(_, v) => v && onPick(v.id, v.stir)} noOptionsText={q.length < 2 ? t("ctr_type_2") : t("no_results")}
-    renderOption={(props, o) => <li {...props} key={o.id}><Box><Typography>{o.name}</Typography>
-      <Typography variant="caption" color="text.secondary">{o.code} · {o.stir ?? "—"} · {districts.find((d) => d.id === o.district_id)?.name}</Typography></Box></li>}
-    renderInput={(p) => <TextField {...p} label={t("ctr_find_customer")} placeholder={t("ctr_find_hint")} />} />;
-}
-
-/** Birinchi qadam: kontragent STIR'i (yoki bazadan qidiruv). Amaldagi shartnoma bo'lsa — qo'shimcha shartnoma taklifi;
- * bazada yo'q bo'lsa — onNew (rekvizitlar formasi, korxona «Tekshirish»da yaratiladi). Korxona alohida qo'shilmaydi. */
-function CounterpartyStep({ districts, initialStir, onPick, onNew, fail }: { districts: District[]; initialStir?: string;
-  onPick: (id: number) => void; onNew: (stir: string) => void; fail: (e: unknown) => void }) {
-  const { t } = useI18n();
-  const [stir, setStir] = useState(initialStir && /^\d{9}$/.test(initialStir) ? initialStir : "");
+  const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
-  const [active, setActive] = useState<StirLookup | null>(null);
-  const ok = /^\d{9}$/.test(stir);
-  const check = useCallback(async (s: string, pickedId?: number) => {
+  const c = lookup.last_contract!;
+  const send = async (kind: "amendment" | "branch" | "address") => {
     setBusy(true);
-    try {
-      const r = await contractsApi.lookup(s);
-      if (r.customer && r.active_contract) setActive(r);
-      else if (r.customer) onPick(r.customer.id);
-      else if (pickedId) onPick(pickedId);
-      else onNew(s);
-    } catch (e) { fail(e); } finally { setBusy(false); }
-  }, [onPick, onNew, fail]);
-  const auto = useRef(false);
-  useEffect(() => {  // murojaatdan: STIR tayyor — darhol tekshiriladi
-    if (!auto.current && initialStir && /^\d{9}$/.test(initialStir)) { auto.current = true; check(initialStir); }
-  }, [initialStir, check]);
-  const reset = () => { setActive(null); setStir(""); };
+    try { await contractsApi.request({ stir, kind, note: note.trim() || null }); toast(t(`cr_sent_${kind}` as MessageKey), "success"); onSent(); }
+    catch (e) { fail(e); } finally { setBusy(false); }
+  };
   return (
-    <Stack spacing={2} id="ctr-customer-step" sx={{ maxWidth: 640, width: "100%", alignSelf: "center", mx: "auto", minHeight: { sm: "40vh" }, justifyContent: "center" }}>
-      <Typography variant="body2" color="text.secondary" textAlign="center">{t("cpt_hint")}</Typography>
-      <Stack direction="row" spacing={1.5} component="form" onSubmit={(e) => { e.preventDefault(); if (ok && !busy) check(stir); }}>
-        <TextField id="cp-stir" size="small" label={t("cp_stir")} value={stir} autoFocus sx={{ flex: 1 }}
-          onChange={(e) => setStir(onlyDigits(e.target.value, 9))} inputProps={{ inputMode: "numeric", maxLength: 9 }}
-          helperText={stir && !ok ? t("ctr_digits", { n: "9" }) : " "} error={!!stir && !ok} />
-        <Button id="cp-search" type="submit" variant="contained" disableElevation disabled={!ok || busy} sx={{ alignSelf: "flex-start", height: 40 }}>
-          {t("cp_search")}</Button>
-      </Stack>
-      <Divider>{t("ctr_or")}</Divider>
-      <CustomerSearch districts={districts} onPick={(id, s) => (s ? check(s, id) : onPick(id))} />
-      {active?.customer && active.active_contract && <Dialog open onClose={reset} maxWidth="xs" fullWidth id="cp-active-dialog">
-        <DialogTitle sx={{ fontWeight: 700 }}>{t("cp_active_title")}</DialogTitle>
-        <DialogContent><Typography>{t("cp_active_text", { name: active.customer.name, number: active.active_contract.number,
-          to: active.active_contract.valid_to })}</Typography></DialogContent>
-        <DialogActions>
-          <Button id="cp-active-no" onClick={reset}>{t("cp_no")}</Button>
-          <Button id="cp-active-yes" variant="contained" disableElevation onClick={() => { toast(t("cp_amend_soon"), "info"); reset(); }}>{t("cp_yes")}</Button>
-        </DialogActions>
-      </Dialog>}
-    </Stack>
+    <Dialog open onClose={() => !busy && onCancel()} maxWidth="sm" fullWidth id="cp-request-dialog">
+      <DialogTitle sx={{ fontWeight: 700 }}>{t("cr_title")}</DialogTitle>
+      <DialogContent dividers>
+        <Stack spacing={2}>
+          <Typography>{t("cr_text", { name: lookup.customer?.name ?? "", number: c.number, to: c.valid_to })}</Typography>
+          <TextField size="small" label={`${t("cr_note")} (${t("ctr_optional_short")})`} value={note} onChange={(e) => setNote(e.target.value)}
+            inputProps={{ maxLength: 500 }} />
+          <Stack spacing={1}>
+            <Button id="cr-amendment" variant="contained" disableElevation disabled={busy} onClick={() => send("amendment")}>{t("cr_amendment")}</Button>
+            <Button id="cr-branch" variant="outlined" disabled={busy} onClick={() => send("branch")}>{t("cr_branch")}</Button>
+            <Button id="cr-address" variant="outlined" disabled={busy} onClick={() => send("address")}>{t("cr_address")}</Button>
+          </Stack>
+        </Stack>
+      </DialogContent>
+      <DialogActions><Button id="cr-cancel" onClick={onCancel} disabled={busy}>{t("cancel")}</Button></DialogActions>
+    </Dialog>
   );
 }
 

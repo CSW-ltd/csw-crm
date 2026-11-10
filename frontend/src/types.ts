@@ -259,6 +259,7 @@ export interface RequestDetail extends RequestItem {
 export interface StirLookup {
   customer: { id: number; name: string; district_id: number; code: string } | null;
   active_contract: { id: number; number: string; valid_from: string; valid_to: string } | null;
+  last_contract: { id: number; number: string; valid_from: string; valid_to: string } | null;
 }
 
 export interface Appeal {

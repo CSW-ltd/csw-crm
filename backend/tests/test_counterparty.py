@@ -12,7 +12,7 @@ STIR = "309555777"
 async def test_lookup_unknown_stir(world, client_factory):
     legal = await client_factory("legal")
     r = await legal.get("/api/v1/contracts/lookup", params={"stir": STIR})
-    assert r.status_code == 200 and r.json() == {"customer": None, "active_contract": None}
+    assert r.status_code == 200 and r.json() == {"customer": None, "active_contract": None, "last_contract": None}
     assert (await legal.get("/api/v1/contracts/lookup", params={"stir": "12345"})).status_code == 422
 
 
@@ -73,3 +73,32 @@ async def test_contract_without_coords_ok(world, client_factory):
     r = await legal.post("/api/v1/contracts", json=body(cust["id"], requisites=req))
     assert r.status_code == 201, r.text
     assert r.json()["customer"]["location_status"] == "none"
+
+
+async def test_new_contract_starts_today(world, client_factory):
+    """Yangi shartnoma: boshlanish sanasi — bugun (formadagi sana e'tiborsiz)."""
+    legal = await client_factory("legal")
+    a = world["districts"]["a"]
+    cust = (await legal.post("/api/v1/contracts/counterparty", json={"stir": STIR, "name": "Bugungi MChJ", "district_id": a})).json()
+    req = {**REQ, "stir": STIR, "name": "Bugungi MChJ"}
+    r = await legal.post("/api/v1/contracts", json=body(cust["id"], requisites=req, valid_from=str(T - timedelta(days=40))))
+    assert r.status_code == 201, r.text
+    assert r.json()["valid_from"] == str(T)
+
+
+async def test_requests_for_existing_counterparty(world, client_factory):
+    legal = await client_factory("legal")
+    stir = "305123456"  # world korxonasi — imzolangan shartnomasi bor
+    lk = (await legal.get("/api/v1/contracts/lookup", params={"stir": stir})).json()
+    assert lk["last_contract"] is not None
+    for kind in ("amendment", "branch", "address"):
+        r = await legal.post("/api/v1/contracts/requests", json={"stir": stir, "kind": kind, "note": "sinov"})
+        assert r.status_code == 201, r.text
+        assert r.json()["contract_id"] == lk["last_contract"]["id"]
+    rows = (await legal.get("/api/v1/contracts/requests")).json()
+    assert {x["kind"] for x in rows} == {"amendment", "branch", "address"} and all(x["status"] == "new" for x in rows)
+    assert len((await legal.get("/api/v1/contracts/requests", params={"kind": "branch"})).json()) == 1
+    bad = await legal.post("/api/v1/contracts/requests", json={"stir": STIR, "kind": "branch"})
+    assert bad.status_code == 404  # bazada yo'q STIR
+    bad = await legal.post("/api/v1/contracts/requests", json={"stir": stir, "kind": "boshqa"})
+    assert bad.status_code == 422

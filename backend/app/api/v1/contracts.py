@@ -86,6 +86,22 @@ async def lookup(stir: str = Query(pattern=r"^\d{9}$"), user: User = Legal, db: 
     return await svc.lookup(db, user, stir)
 
 
+@router.post("/requests", status_code=201)
+async def create_request(body: svc.RequestIn, user: User = Legal, db: AsyncSession = DB) -> dict:
+    """Mavjud kontragent: qo'shimcha shartnoma (buxgalterga), yangi filial yoki manzil o'zgartirish (GPS'ga) so'rovi."""
+    r = await svc.create_request(db, user, body)
+    return {"id": r.id, "kind": r.kind, "status": r.status, "contract_id": r.contract_id, "customer_id": r.customer_id}
+
+
+@router.get("/requests")
+async def list_requests(kind: str | None = Query(None, pattern="^(amendment|branch|address)$"),
+                        status: str | None = Query(None, pattern="^(new|done|cancelled)$"),
+                        user: User = Depends(require_perm("customers.contract", "accounting.view", "requests.view")),
+                        db: AsyncSession = DB) -> list[dict]:
+    """So'rovlar navbati (buxgalter — qo'shimcha shartnoma, GPS — filial/manzil; 2–3-qismlarda bajariladi)."""
+    return await svc.list_requests(db, user, kind, status)
+
+
 @router.post("/counterparty", status_code=201)
 async def counterparty(body: svc.CounterpartyIn, user: User = Legal, db: AsyncSession = DB) -> dict:
     """Kontragent → korxona: STIR bazada bo'lsa o'sha, aks holda rekvizitlardan yangi korxona."""

@@ -385,6 +385,23 @@ class Appeal(TimestampMixin, Base):
     contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id"))
 
 
+class ContractRequest(TimestampMixin, Base):
+    """Mavjud kontragent bo'yicha so'rov (yangi shartnoma o'rniga): amendment — qo'shimcha shartnoma (buxgalterga),
+    branch — yangi filial, address — manzilni o'zgartirish (GPS'ga). Holat: new → done | cancelled."""
+    __tablename__ = "contract_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10), index=True)
+    status: Mapped[str] = mapped_column(String(10), default="new", index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id"))
+    district_id: Mapped[int] = mapped_column(ForeignKey("districts.id"), index=True)
+    note: Mapped[str | None] = mapped_column(String(500))
+    data: Mapped[str | None] = mapped_column(Text)  # JSON: bajarilganda (narx, Didox ID, filial/manzil ma'lumotlari)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    handled_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
 class WorkSchedule(TimestampMixin, Base):
     """Kunlik ish jadvali: GPS xodimi har tuman uchun mashinani haydovchi va xizmat turi (yuridik/jismoniy) bilan biriktiradi.
     Kelajakdagi GPS-monitoring tizimi shu jadvalni API orqali o'qiydi va to'ldiradi."""

@@ -20,7 +20,7 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.core.errors import AppError, conflict, invalid, not_found
 from app.db.base import utcnow
-from app.models import Appeal, Contract, ContractEvent, Customer, District, Provider, User
+from app.models import Appeal, Contract, ContractEvent, ContractRequest, Customer, District, Provider, User
 from app.models.enums import AppealStatus, ContractType, LocationStatus
 from app.services import access, billing, contract_templates, tariffs
 from app.services.geo import coords_error
@@ -137,7 +137,10 @@ async def _overlap(db: AsyncSession, customer_id: int, vf: date, vt: date, own_i
 
 
 async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id: int | None = None,
-                   existing_src: bool = False) -> tuple[Customer, list[dict]]:
+                   existing_src: bool = False, fresh: bool = False) -> tuple[Customer, list[dict]]:
+    """fresh — yangi shartnoma raqam olmoqda: boshlanish sanasi = bugun (qo'lda o'zgartirilmaydi)."""
+    if fresh and not body.existing:
+        body.valid_from = local_day(utcnow())
     cust = await db.get(Customer, body.customer_id)
     if not cust:
         raise not_found("customer")
@@ -218,11 +221,12 @@ async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id:
 
 
 async def check(db: AsyncSession, actor: User, body: ContractDraftIn, own_id: int | None = None) -> dict:
-    existing_src = False
+    existing_src, fresh = False, True
     if own_id:
         own = await db.get(Contract, own_id)
         existing_src = bool(own and own.source in ("manual", "import"))
-    _, errs = await validate(db, actor, body, own_id, existing_src)
+        fresh = bool(own and not own.number and not existing_src)
+    _, errs = await validate(db, actor, body, own_id, existing_src, fresh=fresh)
     t = totals(body.type, body.price, body.annual_volume, body.annual_trips, body.valid_from, body.valid_to)
     return {"ok": not errs, "errors": errs, "totals": {"qty": float(t["qty"]), "unit": t["unit"], "net": float(t["net"]), "vat": float(t["vat"]),
                                                       "total": float(t["total"]), "words": money_words(t["total"]),
@@ -286,7 +290,7 @@ def _event(ct: Contract, actor: User, action: str, comment: str | None = None) -
 
 
 async def create(db: AsyncSession, actor: User, body: ContractDraftIn) -> Contract:
-    cust, errs = await validate(db, actor, body)
+    cust, errs = await validate(db, actor, body, fresh=True)
     _raise(errs)
     prov = await _provider(db, cust.district_id)
     number = await next_number(db, prov.code if prov else "SH", body.valid_from.year)
@@ -376,7 +380,8 @@ async def update(db: AsyncSession, actor: User, contract_id: int, body: Contract
     if ct.status not in ("draft", "returned"):
         raise conflict("contract_locked", "Shartnoma imzolangan — faqat buxgalter qaytarsa o'zgartiriladi")
     body.customer_id = ct.customer_id
-    cust, errs = await validate(db, actor, body, own_id=ct.id, existing_src=ct.source in ("manual", "import"))
+    cust, errs = await validate(db, actor, body, own_id=ct.id, existing_src=ct.source in ("manual", "import"),
+                                fresh=not ct.number and ct.source not in ("manual", "import"))
     _raise(errs)
     _apply(cust, ct, body)
     if not ct.number:  # tugallanmagan loyiha — raqam tekshiruvdan o'tgach beriladi
@@ -438,11 +443,67 @@ async def lookup(db: AsyncSession, actor: User, stir: str) -> dict:
     from app.repositories import customers as cust_repo
     cust = await cust_repo.by_stir(db, stir)
     if not cust:
-        return {"customer": None, "active_contract": None}
+        return {"customer": None, "active_contract": None, "last_contract": None}
     access.check_scope(actor, cust.district_id)
     act = await active_contract(db, cust.id)
+    last = await last_contract(db, cust.id)
+    brief = lambda c: {"id": c.id, "number": c.display_number, "valid_from": c.valid_from, "valid_to": c.valid_to}  # noqa: E731
     return {"customer": {"id": cust.id, "name": cust.name, "district_id": cust.district_id, "code": cust.code},
-            "active_contract": {"id": act.id, "number": act.display_number, "valid_from": act.valid_from, "valid_to": act.valid_to} if act else None}
+            "active_contract": brief(act) if act else None, "last_contract": brief(last) if last else None}
+
+
+async def last_contract(db: AsyncSession, customer_id: int) -> Contract | None:
+    """Oxirgi imzolangan (faol holatdagi) shartnoma — muddati tugagan bo'lsa ham."""
+    q = (select(Contract).where(Contract.customer_id == customer_id, Contract.status.in_(LIVE))
+         .order_by(Contract.valid_to.desc(), Contract.id.desc()).limit(1))
+    return (await db.execute(q)).scalar_one_or_none()
+
+
+REQUEST_KINDS = {"amendment": "Qo'shimcha shartnoma", "branch": "Yangi filial", "address": "Manzilni o'zgartirish"}
+
+
+class RequestIn(BaseModel):
+    stir: str = Field(pattern=r"^\d{9}$")
+    kind: str = Field(pattern="^(amendment|branch|address)$")
+    note: str | None = Field(None, max_length=500)
+
+
+async def create_request(db: AsyncSession, actor: User, body: RequestIn) -> ContractRequest:
+    """Yangi shartnoma o'rniga — mavjud kontragent bo'yicha so'rov: qo'shimcha shartnoma (buxgalterga) yoki filial/manzil (GPS'ga)."""
+    from app.repositories import customers as cust_repo
+    cust = await cust_repo.by_stir(db, body.stir)
+    if not cust:
+        raise not_found("customer")
+    access.check_scope(actor, cust.district_id)
+    last = await last_contract(db, cust.id)
+    if not last:
+        raise invalid("no_contract", "Bu korxonada imzolangan shartnoma yo'q")
+    r = ContractRequest(kind=body.kind, customer_id=cust.id, contract_id=last.id, district_id=cust.district_id,
+                        note=(body.note or "").strip() or None, created_by_id=actor.id)
+    db.add(r)
+    await db.flush()
+    from app.services import situation
+    situation.activity(db, "act_contract_request", f"So'rov: {REQUEST_KINDS[body.kind]} — {last.display_number} «{cust.name}»",
+                       params={"kind": body.kind, "contract": last.display_number, "customer": cust.name},
+                       district_id=cust.district_id, actor_id=actor.id, ref=("customer", cust.id))
+    await db.commit()
+    return r
+
+
+async def list_requests(db: AsyncSession, actor: User, kind: str | None, status: str | None) -> list[dict]:
+    q = select(ContractRequest, Customer, Contract).join(Customer, Customer.id == ContractRequest.customer_id) \
+        .outerjoin(Contract, Contract.id == ContractRequest.contract_id).order_by(ContractRequest.id.desc()).limit(300)
+    s = access.scope(actor)
+    if s is not None:
+        q = q.where(ContractRequest.district_id.in_(s or {-1}))
+    if kind:
+        q = q.where(ContractRequest.kind == kind)
+    if status:
+        q = q.where(ContractRequest.status == status)
+    return [{"id": r.id, "kind": r.kind, "status": r.status, "note": r.note, "created_at": r.created_at, "district_id": r.district_id,
+             "customer": {"id": c.id, "name": c.name, "stir": c.stir, "code": c.code, "phone": c.phone},
+             "contract": {"id": ct.id, "number": ct.display_number, "valid_to": ct.valid_to, "price": float(ct.price) if ct.price else None} if ct else None}
+            for r, c, ct in (await db.execute(q)).all()]
 
 
 class CounterpartyIn(BaseModel):

@@ -22,7 +22,7 @@ import HistoryIcon from "@mui/icons-material/History";
 
 /** Tuman xodimlari faoliyati jurnali (backend: situation.activity) */
 export const ACTIVITY_KINDS = ["act_request_created", "act_request_cancelled", "act_assigned", "act_form_printed",
-  "act_print_confirmed", "act_form_closed", "act_act_completed", "act_contract_started", "act_contract_saved", "act_contract_signed",
+  "act_print_confirmed", "act_form_closed", "act_act_completed", "act_contract_started", "act_contract_request", "act_contract_saved", "act_contract_signed",
   "act_contract_imported", "act_contract_import", "act_contract_approved", "act_contract_returned", "act_tariff_set", "act_tariff_lock",
   "act_payment", "act_payment_cancelled", "act_payment_import", "act_invoices_generated", "act_invoices_sent", "act_location_confirmed"] as const;
 

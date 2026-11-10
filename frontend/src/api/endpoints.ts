@@ -229,6 +229,9 @@ export const contractsApi = {
   start: (customer_id: number, appeal_id?: number) => api.post<ContractItem>("/contracts/start", { customer_id, appeal_id: appeal_id ?? null }).then((r) => r.data),
   /** STIR bo'yicha korxona va amaldagi shartnoma (bo'lsa — qo'shimcha shartnoma taklifi). */
   lookup: (stir: string) => api.get<StirLookup>("/contracts/lookup", { params: { stir } }).then((r) => r.data),
+  /** Mavjud kontragent: qo'shimcha shartnoma (buxgalterga), yangi filial yoki manzil (GPS'ga) so'rovi. */
+  request: (body: { stir: string; kind: "amendment" | "branch" | "address"; note?: string | null }) =>
+    api.post<{ id: number }>("/contracts/requests", body).then((r) => r.data),
   /** Kontragent → korxona: STIR bazada bo'lsa o'sha, aks holda yangi korxona. */
   counterparty: (body: { stir: string; name: string; district_id: number; phone?: string | null }) =>
     api.post<{ id: number; name: string; district_id: number; code: string }>("/contracts/counterparty", body).then((r) => r.data),
