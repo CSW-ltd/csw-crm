@@ -1,7 +1,8 @@
 /** Obyekt xaritasi (Leaflet + OSM / sun'iy yo'ldosh): nuqta, radius (doira) yoki poligon geofence.
  * onChange bo'lmasa — faqat ko'rish. Chizish Geoman orqali (pm:create → qiymat → qatlam olib tashlanadi, xarita props'dan chiziladi). */
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Button, Stack, TextField, Typography } from "@mui/material";
+import UndoIcon from "@mui/icons-material/Undo";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import "@geoman-io/leaflet-geoman-free";
@@ -26,7 +27,7 @@ function centroid(pts: [number, number][]): [number, number] {
 }
 
 /** Geoman: chizish rejimlari va natijani qiymatga aylantirish. */
-function Draw({ value, onChange }: { value: MapValue; onChange: (v: MapValue) => void }) {
+function Draw({ value, onChange, onDrawing }: { value: MapValue; onChange: (v: MapValue) => void; onDrawing: (shape: string | null) => void }) {
   const map = useMap();
   const ref = useRef(value);
   ref.current = value;
@@ -50,9 +51,18 @@ function Draw({ value, onChange }: { value: MapValue; onChange: (v: MapValue) =>
       map.removeLayer(e.layer);
       map.pm.disableDraw();
     };
+    const onStart = (e: { shape: string }) => onDrawing(e.shape);
+    const onEnd = () => onDrawing(null);
     map.on("pm:create", onCreate as unknown as L.LeafletEventHandlerFn);
-    return () => { map.off("pm:create", onCreate as unknown as L.LeafletEventHandlerFn); map.pm.disableDraw(); };
-  }, [map]);  // onChange — ref orqali: forma qayta chizilganda chizish uzilmasin
+    map.on("pm:drawstart", onStart as unknown as L.LeafletEventHandlerFn);
+    map.on("pm:drawend", onEnd);
+    return () => {
+      map.off("pm:create", onCreate as unknown as L.LeafletEventHandlerFn);
+      map.off("pm:drawstart", onStart as unknown as L.LeafletEventHandlerFn);
+      map.off("pm:drawend", onEnd);
+      map.pm.disableDraw();
+    };
+  }, [map, onDrawing]);  // onChange — ref orqali: forma qayta chizilganda chizish uzilmasin
   return null;
 }
 
@@ -73,6 +83,42 @@ export default function MapEditor({ value, onChange, height = 360, error }: Prop
   const { t } = useI18n();
   const mapRef = useRef<L.Map | null>(null);
   const editable = !!onChange;
+  // «Bekor qilish»: har o'zgarishdan oldingi holat stekda; poligon chizilayotganda — oxirgi nuqta olib tashlanadi
+  const history = useRef<MapValue[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [drawing, setDrawing] = useState<string | null>(null);
+  const current = useRef(value);
+  current.current = value;
+  const change = useCallback((v: MapValue) => {
+    history.current.push(current.current);
+    if (history.current.length > 50) history.current.shift();
+    setCanUndo(true);
+    onChange?.(v);
+  }, [onChange]);
+  const undo = useCallback(() => {
+    const draw = (mapRef.current?.pm as unknown as { Draw?: Record<string, { _removeLastVertex?: () => void; _layer?: L.Polyline }> })?.Draw;
+    const poly = draw?.Polygon;
+    if (drawing === "Polygon" && poly?._layer && (poly._layer.getLatLngs() as L.LatLng[]).length > 0) {
+      poly._removeLastVertex?.();
+      return;
+    }
+    if (drawing) { mapRef.current?.pm.disableDraw(); return; }
+    const prev = history.current.pop();
+    setCanUndo(history.current.length > 0);
+    if (prev) onChange?.(prev);
+  }, [drawing, onChange]);
+  useEffect(() => {
+    if (!editable) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+        const el = document.activeElement;
+        if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA")) return;  // matn maydonida o'z undo'si
+        e.preventDefault(); undo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [editable, undo]);
   const center = useMemo<[number, number]>(() => (value.lat != null && value.lng != null ? [value.lat, value.lng] : UZ), []);  // eslint-disable-line react-hooks/exhaustive-deps
   const draw = (shape: "Marker" | "Circle" | "Polygon") => mapRef.current?.pm.enableDraw(shape, { finishOn: shape === "Polygon" ? "dblclick" : undefined });
   const gf = value.geofence;
@@ -80,12 +126,14 @@ export default function MapEditor({ value, onChange, height = 360, error }: Prop
   return (
     <Stack spacing={1} sx={{ gridColumn: "1 / -1" }} id="map-editor">
       {editable && <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" alignItems="center">
+        <Button size="small" variant="outlined" startIcon={<UndoIcon />} onClick={undo} disabled={!canUndo && !drawing} id="map-undo"
+          title="Ctrl/Cmd+Z">{t("map_undo")}</Button>
         <Button size="small" variant="outlined" onClick={() => draw("Marker")} id="map-point">{t("map_point")}</Button>
         <Button size="small" variant="outlined" onClick={() => draw("Circle")} id="map-circle">{t("map_circle")}</Button>
         <Button size="small" variant="outlined" onClick={() => draw("Polygon")} id="map-polygon">{t("map_polygon")}</Button>
         {gf?.type === "circle" && <TextField size="small" type="number" label={t("map_radius_m")} value={gf.radius} sx={{ width: 140 }}
-          inputProps={{ min: 10, max: 3000 }} onChange={(e) => onChange!({ ...value, geofence: { type: "circle", radius: Math.max(0, Number(e.target.value) || 0) } })} />}
-        {(pos || gf) && <Button size="small" color="error" onClick={() => onChange!({ lat: null, lng: null, geofence: null })} id="map-clear">{t("map_clear")}</Button>}
+          inputProps={{ min: 10, max: 3000 }} onChange={(e) => change({ ...value, geofence: { type: "circle", radius: Math.max(0, Number(e.target.value) || 0) } })} />}
+        {(pos || gf) && <Button size="small" color="error" onClick={() => change({ lat: null, lng: null, geofence: null })} id="map-clear">{t("map_clear")}</Button>}
         <Typography variant="caption" color="text.secondary">{t("map_hint")}</Typography>
       </Stack>}
       <Box sx={{ height, borderRadius: 1, overflow: "hidden", border: 1, borderColor: error ? "error.main" : "divider" }}>
@@ -100,10 +148,10 @@ export default function MapEditor({ value, onChange, height = 360, error }: Prop
             </LayersControl.BaseLayer>
           </LayersControl>
           {pos && <Marker position={pos} draggable={editable}
-            eventHandlers={editable ? { dragend: (e) => { const p = (e.target as L.Marker).getLatLng(); onChange!({ ...value, lat: p.lat, lng: p.lng }); } } : undefined} />}
+            eventHandlers={editable ? { dragend: (e) => { const p = (e.target as L.Marker).getLatLng(); change({ ...value, lat: p.lat, lng: p.lng }); } } : undefined} />}
           {pos && gf?.type === "circle" && <Circle center={pos} radius={gf.radius} pathOptions={{ color: "#1E6FD9" }} />}
           {gf?.type === "polygon" && <Polygon positions={gf.points} pathOptions={{ color: "#1E6FD9" }} />}
-          {editable && <Draw value={value} onChange={onChange!} />}
+          {editable && <Draw value={value} onChange={change} onDrawing={setDrawing} />}
           <Fit value={value} />
         </MapContainer>
       </Box>
