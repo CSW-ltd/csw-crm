@@ -1,5 +1,6 @@
-# admin.csw.uz — faqat shu IP'lardan. Nusxa: cp admin-allow.conf.example admin-allow.conf (fayl faqat serverda, git'da emas).
-# Har manzil alohida qatorda; ofis, VPN va h.k. O'zgartirgandan keyin: ../dc exec edge nginx -s reload
+# admin.csw.uz kirish ro'yxati. Nusxa: cp admin-allow.conf.example admin-allow.conf (fayl faqat serverda, git'da emas).
+# 2026-11-11 dan: allow all (ofis IP har kuni o'zgaradi). Cheklash kerak bo'lsa — quyidagilarni yoqib, «allow all»ni olib tashlang:
 # allow 203.0.113.10;     # ofis (namuna — haqiqiy IP emas)
 # allow 198.51.100.0/28;  # VPN (namuna)
-deny all;
+# deny all;
+allow all;

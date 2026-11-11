@@ -5,9 +5,9 @@ Hamma serverda: Ubuntu 24.04, faqat kalit bilan SSH, `ufw`, `fail2ban`, Docker (
 
 ```
 internet ──443──▶ csw-app: edge nginx ─┬─▶ web ─▶ api ──3306──▶ csw-db: mysql
-                                       │                └──────▶ UzCloud S3 (csw-files)
+                                       │                └──────▶ UzCloud S3 (csw-files-<CRN>)
                                        └─▶ csw-test:8080 (*.test.csw.uz; o'z mysql + minio)
-csw-db: backup.sh (har tun) ──▶ /var/backups/csw (7 kun) + S3 csw-backups (age bilan shifrlangan)
+csw-db: backup.sh (har tun) ──▶ /var/backups/csw (7 kun) + S3 csw-backups-<CRN> (age bilan shifrlangan)
 ```
 
 ## Reliz oqimi
@@ -53,7 +53,19 @@ systemctl list-timers csw-backup.timer           # keyingi ishga tushish
 journalctl -u csw-backup --since today           # natija
 ```
 
-S3 kaliti faqat `csw-backups` bucket'iga yozish huquqli bo'lsin (prod `csw-files` kalitidan alohida).
+S3 kaliti faqat zaxira omboriniki bo'lsin (prod fayllari omboridan alohida).
+
+### UzCloud Object Storage — muhim
+- Ikki alohida ombor (Object Storage): `csw-prod` (bucket `csw-files`, **Versioning yoqilgan**, Object Lock — yo'q) va
+  `csw-backup` (bucket `csw-backups`, versioning'siz — eski zaxiralarni skript o'chiradi). Kalitlar ombor bo'yicha (panel → «Credentials»).
+- **UzCloud bucket nomiga mijoz raqamini qo'shadi:** `csw-files` → `csw-files-<CRN>`. `.env`da `MINIO_BUCKET` va `backup.env`da
+  `BACKUP_REMOTE=uzs3:csw-backups-<CRN>/db` — paneldagi aniq nom bilan. Noto'g'ri nomda `AccessDenied` qaytadi.
+- `HEAD` so'rovida (bucket tekshiruvi) noto'g'ri secret ham `AccessDenied` bo'lib ko'rinadi; aniq sababni `list_buckets` ko'rsatadi
+  (`SignatureDoesNotMatch` — secret xato).
+- **Kalitni terminalga joylashtirish:** bash «bracketed paste» qiymat boshi/oxiriga ko'rinmas `ESC[200~`/`ESC[201~` (12 belgi) qo'shadi —
+  kalit buziladi. Avval `bind 'set enable-bracketed-paste off'`, keyin bitta qatorda `read -s -p "Secret: " SK; echo "${#SK}"`
+  (uzunlik: access 20, secret 40) va `.env`ga python bilan yozing (`sed` `&`/`\` belgilarni buzadi). Bir nechta qatorni birga joylashtirmang.
+- Shartnoma va fayllar **umrbod** saqlanadi — bucket'larga lifecycle (avto-o'chirish) qoidasi qo'shilmaydi.
 
 **Tiklash** (har oy sinab ko'ring — avval boshqa nomli bazaga):
 
@@ -71,7 +83,7 @@ shred -u ~/key.txt
 | Host | Vazifa |
 |---|---|
 | `csw.uz` (`www` → 301) | landing («tez orada»); faqat `/api/v1/public/` (ochiq faktura havolalari) api'ga o'tadi |
-| `admin.csw.uz` | admin — faqat `admin-allow.conf`dagi IP'lardan |
+| `admin.csw.uz` | admin (`admin-allow.conf`; 2026-11-11 dan `allow all` — ofis IP har kuni o'zgaradi) |
 | `manager.csw.uz`, `legal.csw.uz`, `account.csw.uz` | 1-bosqich rol portallari (`PORTAL_HOSTS`) |
 | `*.test.csw.uz` (`TEST_HOSTS`) | csw-test'ga proksi; admin testda ochiq |
 
@@ -80,7 +92,7 @@ Har rol faqat o'z subdomenida kiradi (`ROLE_HOSTS`, boshqa rol — `wrong_portal
 ```bash
 cd /opt/csw/deploy/app
 cp .env.example .env && chmod 600 .env          # JWT_SECRET: openssl rand -hex 48
-cp admin-allow.conf.example admin-allow.conf    # allow <ofis IP>; ... deny all;  (fayl faqat serverda)
+cp admin-allow.conf.example admin-allow.conf    # hozir: allow all;  (fayl faqat serverda)
 sudo ufw allow 80,443/tcp
 
 ./certs.sh <email>                              # Let's Encrypt (HTTP-01) .env'dagi barcha hostlar uchun
@@ -88,7 +100,7 @@ sudo ufw allow 80,443/tcp
 ```
 
 `admin-allow.conf` bo'lmasa `edge` ishga tushmaydi (Docker uning o'rniga papka yaratadi — `rm -rf admin-allow.conf` va nusxani qayta oling).
-IP o'zgarsa: faylni tahrirlang → `../dc exec edge nginx -s reload`.
+Cheklovni qayta yoqish: `allow <IP>; ... deny all;` → `../dc exec edge nginx -t && ../dc exec edge nginx -s reload`. Cheklovsiz holatda himoya: login so'rov cheklovi (10/daqiqa), 5 xatodan keyin 15 daqiqa blok, kuchli parol; 2FA — reja.
 
 **Yangi portal ochish** (masalan `call.csw.uz` → operator): `.env`da `PORTAL_HOSTS`, `ROLE_HOSTS`, `CORS_ORIGINS` (va kerak bo'lsa
 `ACTIVE_ROLES`) ga qo'shing → `./certs.sh <email>` (sertifikat kengaytiriladi) → `../deploy.sh $(cat .image-tag)`.
@@ -126,7 +138,7 @@ Test serverga haqiqiy ma'lumot yuklanmaydi.
 
 ## Tekshiruv ro'yxati (har serverda)
 
-- `curl -sk https://<csw-app IP>/` va `curl -s https://boshqa.csw.uz/` → ulanish rad etiladi; `admin.csw.uz` ofisdan tashqarida → 403.
+- `curl -sk https://<csw-app IP>/` va `curl -s https://boshqa.csw.uz/` → ulanish rad etiladi; `admin.csw.uz` — login sahifasi (IP cheklovi o'chiq).
 - `ss -tlnp`: csw-app — faqat 22/80/443; csw-db — 3306 faqat ichki IP'da; csw-test — 8080 faqat ichki IP'da.
 - `curl -s https://manager.csw.uz/api/v1/health` → `{"status":"ok","db":"ok","version":"<sha>"}`.
 - `APP_ENV=production` da xavfsiz bo'lmagan sozlama (standart `JWT_SECRET`, `COOKIE_SECURE=false`, SQLite, ...) bo'lsa api ishga tushmaydi — `../dc logs api`.
