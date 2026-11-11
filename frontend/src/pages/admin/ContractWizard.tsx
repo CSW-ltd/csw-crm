@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControlLabel, IconButton,
   MenuItem, Paper, Radio, RadioGroup, Stack, Step, StepLabel, Stepper, TextField, ToggleButton, ToggleButtonGroup, Typography, useMediaQuery,
   useTheme } from "@mui/material";
@@ -22,12 +22,13 @@ import { fmtMoney } from "./CompaniesTab";
 import { ExistingImport } from "./ExistingContracts";
 
 const PLATFORMS = ["didox", "hujjat", "soliq", "other"] as const;
+const MapEditor = lazy(() => import("@/components/MapEditor"));  // Leaflet — alohida bo'lak (faqat forma ochilganda yuklanadi)
 const EX_TYPES: ContractType[] = ["by_volume", "per_trip", "monthly", "one_off"];
 const todayIso = () => new Date(Date.now() + 5 * 3600_000).toISOString().slice(0, 10);
 const yearEnd = () => `${todayIso().slice(0, 4)}-12-31`;
 const EMPTY_REQ: Requisites = { name: "", stir: "", director: "", phone: "", legal_address: "", address: "", bank: "", mfo: "", account: "",
-  oked: "", cadastre: "", is_rented: false, lat: null, lng: null };
-type ReqText = Exclude<keyof Requisites, "is_rented" | "lat" | "lng">;
+  oked: "", cadastre: "", is_rented: false, lat: null, lng: null, geofence: null };
+type ReqText = Exclude<keyof Requisites, "is_rented" | "lat" | "lng" | "geofence">;
 const REQ_FIELDS: { k: ReqText; span: number; digits?: number }[] = [
   { k: "name", span: 2 }, { k: "stir", span: 1, digits: 9 }, { k: "director", span: 2 }, { k: "phone", span: 1 },
   { k: "legal_address", span: 3 }, { k: "address", span: 2 }, { k: "cadastre", span: 1 },
@@ -133,7 +134,7 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const fromCustomer = (c: Partial<Requisites> & { name: string }) => ({ ...EMPTY_REQ, ...Object.fromEntries(Object.entries(c)
-    .filter(([k]) => k in EMPTY_REQ).map(([k, v]) => [k, k === "is_rented" ? !!v : k === "lat" || k === "lng" ? v ?? null : v ?? ""])) } as Requisites);
+    .filter(([k]) => k in EMPTY_REQ).map(([k, v]) => [k, k === "is_rented" ? !!v : k === "lat" || k === "lng" || k === "geofence" ? v ?? null : v ?? ""])) } as Requisites);
   const fromContract = useCallback((c: ContractItem) => {
     setCt(c);
     if (c.customer) {
@@ -337,6 +338,11 @@ export function ContractWizard({ districts, contractId, appeal, onClose, onDone 
             <CoordFields lat={form.requisites.lat} lng={form.requisites.lng} error={errOf("coords") ? helper("coords") : undefined}
               status={coordStatus()}
               onChange={(lat, lng) => { setForm((f) => ({ ...f, requisites: { ...f.requisites, lat, lng } })); setChecked(null); }} />
+            <Suspense fallback={<Typography variant="caption" color="text.secondary" sx={{ gridColumn: "1 / -1" }}>…</Typography>}>
+              <MapEditor value={{ lat: form.requisites.lat ?? null, lng: form.requisites.lng ?? null, geofence: form.requisites.geofence ?? null }}
+                error={errOf("geofence") ? helper("geofence") : undefined}
+                onChange={(v) => { setForm((f) => ({ ...f, requisites: { ...f.requisites, lat: v.lat, lng: v.lng, geofence: v.geofence } })); setChecked(null); }} />
+            </Suspense>
           </Box>
           <Divider />
           <Typography variant="subtitle2" color="text.secondary">{t("ctr_terms")}</Typography>

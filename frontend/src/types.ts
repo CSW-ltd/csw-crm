@@ -354,7 +354,24 @@ export interface ProviderReq { id: number; name: string; code: string; region_id
 export type ContractStatus = "draft" | "signed" | "returned" | "approved";
 export interface Requisites { name: string; stir: string | null; director: string | null; phone: string | null; legal_address: string | null;
   address: string | null; bank: string | null; mfo: string | null; account: string | null; oked: string | null; cadastre: string | null;
-  is_rented?: boolean; lat?: number | null; lng?: number | null }
+  is_rented?: boolean; lat?: number | null; lng?: number | null; geofence?: Geofence | null }
+
+/** Obyekt chegarasi: radius (markaz — korxona nuqtasi) yoki poligon. */
+export type Geofence = { type: "circle"; radius: number } | { type: "polygon"; points: [number, number][] };
+
+/** GPS joylashuvni tasdiqlash navbati. */
+export interface LocationQueueItem {
+  customer: { id: number; name: string; code: string | null; stir: string | null; district_id: number; lat: number | null; lng: number | null;
+    geofence: Geofence | null; cadastre: string | null; legal_address: string | null; is_rented: boolean; location_status: string;
+    location_source: string | null };
+  contract: { id: number; number: string; status: string } | null;
+  entered_by: string | null;
+  state: "pending" | "missing";
+}
+
+/** Xodimning shaxsiy bildirishnomasi. */
+export interface NotificationItem { id: number; kind: string; message: string; params: Record<string, unknown> | null; actor: string | null;
+  ref_type: string | null; ref_id: number | null; read: boolean; created_at: string }
 export interface ContractDraft { customer_id: number; requisites: Requisites; type: ContractType; price: number | null; annual_volume: number | null;
   annual_trips: number | null; valid_from: string; valid_to: string; place: string; sign_method: "electronic" | "paper";
   existing?: { number: string; signed_on: string | null; platform?: string | null; platform_id?: string | null } | null; price_reason?: string | null }

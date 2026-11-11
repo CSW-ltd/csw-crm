@@ -130,26 +130,25 @@ async def complete(db: AsyncSession, driver: User, request_id: int, data: Comple
     first_visit = False
     legal_check = None  # yurist kiritgan (tasdiqlanmagan) nuqta: "confirmed" | "mismatch"
     if cust.location_status == LocationStatus.confirmed and cust.lat is not None and cust.lng is not None:
-        dist = distance_m(cust.lat, cust.lng, data.lat, data.lng)
-        in_radius = dist <= radius
+        # GPS tasdiqlagan joylashuv: geofence (poligon yoki radius) bo'yicha; yo'q bo'lsa — tuman radiusi
+        from app.services.geo import check_visit
+        from app.services.locations import geofence_of
+        dist, in_radius, radius = check_visit(cust.lat, cust.lng, geofence_of(cust), data.lat, data.lng, radius)
         if not in_radius:
-            note = f"radiusdan tashqarida: {dist} m"
+            note = f"geofence'dan tashqarida: {dist} m"
     elif cust.location_status == LocationStatus.pending and cust.location_source == "legal" and cust.lat is not None and cust.lng is not None:
-        # Shartnomada yurist kiritgan nuqta: radius ichida — avtomatik tasdiqlanadi; tashqarida — «Shubhali» emas,
-        # Manager'ga ogohlantirish (qaysi nuqta to'g'riligini u hal qiladi)
+        # Shartnomada yurist kiritgan nuqta: faqat GPS tasdiqlaydi (2026-11-11) — tashrif avtomatik tasdiqlamaydi.
+        # Uzoqda bo'lsa — ogohlantirish (GPS navbatida tekshiradi)
         dist, in_radius = distance_m(cust.lat, cust.lng, data.lat, data.lng), None
-        if dist <= radius:
-            cust.location_status = LocationStatus.confirmed
-            legal_check, note = "confirmed", f"shartnomadagi koordinata tasdiqlandi: {dist} m"
-        else:
+        if dist > radius:
             legal_check, note = "mismatch", f"shartnomadagi koordinata mos kelmadi: {dist} m"
     else:
-        # Koordinata tasdiqlanmagan: radius tekshirilmaydi. Birinchi tashrif nuqtasi Manager tasdiqiga yuboriladi.
+        # Koordinata tasdiqlanmagan: radius tekshirilmaydi. Birinchi tashrif nuqtasi GPS tasdig'iga yuboriladi.
         dist = in_radius = None
         if cust.location_status == LocationStatus.none:
             cust.lat, cust.lng, cust.location_status, cust.location_source = data.lat, data.lng, LocationStatus.pending, "driver"
             first_visit = True
-            note = "birinchi tashrif: koordinata Manager tasdiqini kutmoqda"
+            note = "birinchi tashrif: koordinata GPS tasdig'ini kutmoqda"
     act = Act(request_id=req.id, containers=data.containers, volume_m3=data.volume_m3, note=data.note.strip(),
               lat=data.lat, lng=data.lng, distance_m=dist, radius_m=radius, in_radius=in_radius,
               vehicle_plate=req.vehicle.plate if req.vehicle else "",

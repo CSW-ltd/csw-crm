@@ -91,6 +91,11 @@ async def emit_situation(payload: dict) -> None:
     await sio.emit("situation:new", payload, room=rooms)
 
 
+async def emit_notification(user_id: int, payload: dict) -> None:
+    """Shaxsiy bildirishnoma — faqat shu xodimning xonasiga."""
+    await sio.emit("notification:new", payload, room=f"user:{user_id}")
+
+
 async def emit_appeal_updated(payload: dict) -> None:
     """Murojaat yaratildi/ko'rib chiqildi: yuridik bo'lim navbati va operator ekrani."""
     await sio.emit("appeal:updated", payload, room=["legal", "operators", "managers"])

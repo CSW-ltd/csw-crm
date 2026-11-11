@@ -176,6 +176,10 @@ class Customer(TimestampMixin, Base):
     location_status: Mapped[LocationStatus] = mapped_column(enum_col(LocationStatus), default=LocationStatus.none, server_default="none")
     # Koordinata kim tomonidan: legal (shartnomada) | driver (birinchi tashrif) | manager (tasdiq/qo'lda)
     location_source: Mapped[str | None] = mapped_column(String(10))
+    # Obyekt chegarasi (JSON: circle radius yoki polygon nuqtalari) va uni tasdiqlagan GPS xodimi
+    geofence: Mapped[str | None] = mapped_column(Text)
+    location_confirmed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    location_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime)
     source: Mapped[str] = mapped_column(String(10), default="manual", server_default="manual")
     import_batch_id: Mapped[int | None] = mapped_column(ForeignKey("import_batches.id"))
     district: Mapped[District] = relationship()
@@ -400,6 +404,20 @@ class ContractRequest(TimestampMixin, Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     handled_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     handled_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class Notification(TimestampMixin, Base):
+    """Xodimga shaxsiy bildirishnoma (masalan, GPS joylashuvni o'zgartirdi — shartnomani kiritgan legal'ga)."""
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    message: Mapped[str] = mapped_column(String(500))
+    params: Mapped[str | None] = mapped_column(Text)  # JSON: tarjima uchun qiymatlar
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    ref_type: Mapped[str | None] = mapped_column(String(20))
+    ref_id: Mapped[int | None] = mapped_column(Integer)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class WorkSchedule(TimestampMixin, Base):

@@ -5,13 +5,13 @@ from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import DB, require_roles
+from app.api.deps import DB, require_perm, require_roles
 from app.core.errors import invalid
 from app.models import User
 from app.models.enums import Role
 from app.repositories import requests as req_repo
 from app.schemas import AssignIn, RequestOut
-from app.services import assignment_service, schedule
+from app.services import assignment_service, locations, schedule
 
 router = APIRouter(prefix="/gps", tags=["gps"])
 Gps = Depends(require_roles(Role.gps, Role.admin))
@@ -86,3 +86,19 @@ async def vehicle_options(request_id: int, user: User = Gps, db: AsyncSession = 
 @router.post("/requests/{request_id}/assign", response_model=RequestOut)
 async def assign(request_id: int, body: AssignIn, user: User = Gps, db: AsyncSession = DB):
     return await assignment_service.assign(db, user, request_id, body.vehicle_id)
+
+
+# --- Joylashuvni tasdiqlash (faqat GPS; legal kiritgani yoki umuman yo'q) ---
+Locator = Depends(require_perm("customers.location_confirm"))
+
+
+@router.get("/locations")
+async def location_queue(user: User = Locator, db: AsyncSession = DB) -> list[dict]:
+    """Tasdiqlanmagan joylashuvlar: shartnoma raqami, korxona, legal kiritgan nuqta/geofence/kadastr («missing» — kiritilmagan)."""
+    return await locations.queue(db, user)
+
+
+@router.post("/locations/{customer_id}/confirm")
+async def location_confirm(customer_id: int, body: locations.ConfirmIn, user: User = Locator, db: AsyncSession = DB) -> dict:
+    """«Tasdiqlash» yoki «O'zgartirish» (legal kiritganidan farq qilsa izoh majburiy) — nuqta + geofence majburiy."""
+    return await locations.confirm(db, user, customer_id, body)

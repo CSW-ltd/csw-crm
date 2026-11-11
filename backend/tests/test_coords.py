@@ -62,15 +62,16 @@ async def _visit(world, client_factory, coords):
     return (await driver.post(f"/api/v1/driver/requests/{rid}/complete", json={**ACT, **coords})).json()
 
 
-async def test_driver_visit_inside_radius_confirms_legal_point(world, client_factory, sessionmaker):
+async def test_driver_visit_does_not_confirm_legal_point(world, client_factory, sessionmaker):
+    """2026-11-11: joylashuvni faqat GPS tasdiqlaydi — tashrif radius ichida bo'lsa ham «kutilmoqda» qoladi."""
     await _set_legal_point(sessionmaker, world, 40.6415, 72.2390)
     body_ = await _visit(world, client_factory, NEAR)
     assert body_["request"]["status"] == "done"
     async with sessionmaker() as s:
         c = await s.get(Customer, world["customer"].id)
-        assert c.location_status == LocationStatus.confirmed and (c.lat, c.lng) == (40.6415, 72.2390)
+        assert c.location_status == LocationStatus.pending and (c.lat, c.lng) == (40.6415, 72.2390)
         kinds = set((await s.execute(select(SituationEvent.kind))).scalars())
-        assert "act_location_confirmed" in kinds and "location_mismatch" not in kinds
+        assert "act_location_confirmed" not in kinds and "location_mismatch" not in kinds
 
 
 async def test_driver_visit_outside_radius_warns_not_suspect(world, client_factory, sessionmaker):

@@ -1,8 +1,19 @@
 import { api } from "./client";
 import { clearTokens, saveTokens, type Tokens } from "@/lib/session";
 import { closeSocket } from "@/lib/socket";
-import type { ContractCheck, ContractDraft, ContractItem, StirLookup, ExistingImportResult, TariffOverview, InvoiceItem, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
+import type { ContractCheck, ContractDraft, ContractItem, StirLookup, Geofence, LocationQueueItem, NotificationItem, ExistingImportResult, TariffOverview, InvoiceItem, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
   ImportBatch, ImportResult, LocationStatus, Region, Role, SituationEvent, SituationLevel, User } from "@/types";
+
+export const locationsApi = {
+  queue: () => api.get<LocationQueueItem[]>("/gps/locations").then((r) => r.data),
+  confirm: (customerId: number, body: { lat: number; lng: number; geofence: Geofence; cadastre?: string | null; comment?: string | null }) =>
+    api.post(`/gps/locations/${customerId}/confirm`, body).then((r) => r.data),
+};
+
+export const notificationsApi = {
+  mine: () => api.get<{ unread: number; items: NotificationItem[] }>("/notifications").then((r) => r.data),
+  read: (ids?: number[]) => api.post("/notifications/read", { ids: ids ?? null }),
+};
 
 export const gpsApi = {
   newRequests: () => api.get<DriverTask[]>("/gps/requests").then((r) => r.data),

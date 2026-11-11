@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { Alert, AppBar, Box, Button, Container, MenuItem, Select, Toolbar, Typography } from "@mui/material";
+import { NotificationBell } from "@/components/NotificationBell";
 import { SituationBell, SituationProvider } from "@/components/Situation";
 import { useOnline } from "@/hooks/useOnline";
 import { LANGS, useI18n, type Lang } from "@/i18n/I18nContext";
@@ -25,6 +26,7 @@ export function DriverLayout({ children, wide = false }: { children: ReactNode; 
         <Toolbar sx={{ gap: 1.5, flexWrap: "wrap" }}>
           <Typography variant="h6" color="primary" sx={{ fontWeight: 700, mr: "auto" }}>CSW</Typography>
           {watcher && <SituationBell />}
+          {user && user.role !== "driver" && <NotificationBell />}
           <Typography variant="body2" color="text.secondary">{user?.full_name}{plate ? ` · ${plate}` : ""}</Typography>
           <Select size="small" value={lang} onChange={(e) => setLang(e.target.value as Lang)} aria-label="Language">
             {LANGS.map((l) => <MenuItem key={l.id} value={l.id}>{l.label}</MenuItem>)}

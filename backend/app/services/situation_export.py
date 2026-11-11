@@ -23,7 +23,7 @@ KIND_UZ = {
     "act_tariff_set": "Ta'rif o'zgardi", "act_tariff_lock": "Ta'rif qulfi", "act_payment": "To'lov kiritildi",
     "act_payment_cancelled": "To'lov bekor qilindi", "act_payment_import": "To'lovlar importi",
     "act_invoices_generated": "Oy yopildi (fakturalar)", "act_invoices_sent": "Fakturalar jo'natildi",
-    "act_location_confirmed": "Shartnomadagi koordinata tasdiqlandi", "location_mismatch": "Koordinata mos kelmadi",
+    "act_location_confirmed": "Shartnomadagi koordinata tasdiqlandi", "location_mismatch": "Koordinata mos kelmadi", "location_changed": "GPS joylashuvni o'zgartirdi",
     "request_overdue": "Muddati o'tgan murojaatlar", "act_suspect": "Shubhali dalolatnoma", "order_locked": "Varaqa bloklandi",
     "order_reprint": "Qayta chop etishga ruxsat", "customer_updated": "Korxona o'zgartirildi", "customer_created": "Korxona qo'shildi",
 }

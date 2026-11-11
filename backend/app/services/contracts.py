@@ -23,7 +23,7 @@ from app.db.base import utcnow
 from app.models import Appeal, Contract, ContractEvent, ContractRequest, Customer, District, Provider, User
 from app.models.enums import AppealStatus, ContractType, LocationStatus
 from app.services import access, billing, contract_templates, tariffs
-from app.services.geo import coords_error
+from app.services.geo import coords_error, geofence_error
 from app.services.billing import local_day
 from app.services.customer_service import _check_stir
 from app.services.invoice_pdf import words_uz
@@ -53,6 +53,7 @@ class Requisites(BaseModel):
     # Obyekt koordinatasi (ixtiyoriy — joylashuvni GPS oynasi to'ldiradi): yurist kiritsa — «kutilmoqda», tashrif yoki manager tasdiqlaydi
     lat: float | None = Field(None, ge=-90, le=90)
     lng: float | None = Field(None, ge=-180, le=180)
+    geofence: dict | None = None  # {"type": "circle", "radius": m} | {"type": "polygon", "points": [[lat, lng], ...]} — ixtiyoriy
 
 
 class ExistingMeta(BaseModel):
@@ -218,6 +219,11 @@ async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id:
         errs.append(_err("place", "required"))
     if (r.lat is not None or r.lng is not None) and (code := coords_error(r.lat, r.lng)):
         errs.append(_err("coords", code))  # ixtiyoriy, lekin kiritilsa — to'g'ri bo'lsin
+    if r.geofence is not None:
+        if r.lat is None or r.lng is None:
+            errs.append(_err("coords", "required"))  # geofence nuqtasiz bo'lmaydi
+        elif code := geofence_error(r.geofence):
+            errs.append(_err("geofence", code))
     return cust, errs
 
 
@@ -257,13 +263,16 @@ async def next_number(db: AsyncSession, prefix_code: str, year: int) -> str:
 
 
 # --- saqlash ---
-def _apply_location(cust: Customer, lat: float | None, lng: float | None) -> None:
-    """Yurist kiritgan nuqta o'zgargan bo'lsa — «kutilmoqda» (manba legal); o'zgarmagan bo'lsa maqom saqlanadi."""
+def _apply_location(cust: Customer, lat: float | None, lng: float | None, geofence: dict | None = None) -> None:
+    """Yurist kiritgan nuqta/geofence o'zgargan bo'lsa — «kutilmoqda» (manba legal, GPS tasdiqlaydi); o'zgarmagan bo'lsa maqom saqlanadi."""
     if lat is None or lng is None:
         return
     same = cust.lat is not None and cust.lng is not None and abs(cust.lat - lat) < 1e-6 and abs(cust.lng - lng) < 1e-6
-    if not same:
+    gf = json.dumps(geofence) if geofence else None
+    if not same or (gf and gf != cust.geofence):
         cust.lat, cust.lng = lat, lng
+        if gf:
+            cust.geofence = gf
         cust.location_status, cust.location_source = LocationStatus.pending, "legal"
 
 
@@ -275,7 +284,7 @@ def _apply(cust: Customer, ct: Contract, body: ContractDraftIn) -> None:
     for f in ("director", "legal_address", "address", "bank", "mfo", "account", "oked", "cadastre"):
         setattr(cust, f, (getattr(r, f) or "").strip() or None)
     cust.is_rented = r.is_rented
-    _apply_location(cust, r.lat, r.lng)
+    _apply_location(cust, r.lat, r.lng, r.geofence)
     ct.draft_data = None
     ct.type, ct.price, ct.annual_volume, ct.annual_trips = body.type, body.price, body.annual_volume, body.annual_trips
     ct.valid_from, ct.valid_to, ct.place, ct.sign_method = body.valid_from, body.valid_to, (body.place or "").strip(), body.sign_method
@@ -726,7 +735,8 @@ def out(ct: Contract, used: float | None = None, with_events: bool = False) -> d
          "customer": {"id": c.id, "name": c.name, "code": c.code, "stir": c.stir, "district_id": c.district_id, "director": c.director,
                       "phone": c.phone, "legal_address": c.legal_address, "address": c.address, "bank": c.bank, "mfo": c.mfo,
                       "account": c.account, "oked": c.oked, "cadastre": c.cadastre, "is_rented": c.is_rented,
-                      "lat": c.lat, "lng": c.lng, "location_status": c.location_status.value} if c else None,
+                      "lat": c.lat, "lng": c.lng, "location_status": c.location_status.value,
+                      "geofence": json.loads(c.geofence) if c.geofence else None} if c else None,
          "draft": json.loads(ct.draft_data) if ct.draft_data else None, "source": ct.source, "awaiting_scan": awaiting_scan(ct),
          "tariff_price": float(ct.tariff_price) if ct.tariff_price is not None else None, "price_reason": ct.price_reason,
          "submitted_by": next((e.actor.full_name for e in reversed(ct.events) if e.action in ("signed", "resubmitted", "imported") and e.actor),
