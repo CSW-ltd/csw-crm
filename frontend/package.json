@@ -12,12 +12,15 @@
   "dependencies": {
     "@emotion/react": "11.14.0",
     "@emotion/styled": "11.14.0",
+    "@geoman-io/leaflet-geoman-free": "2.17.0",
     "@mui/icons-material": "6.3.0",
     "@mui/material": "6.3.0",
     "@reduxjs/toolkit": "2.5.0",
     "axios": "1.7.9",
+    "leaflet": "1.9.4",
     "react": "18.3.1",
     "react-dom": "18.3.1",
+    "react-leaflet": "4.2.1",
     "react-redux": "9.2.0",
     "react-router-dom": "6.28.1",
     "recharts": "2.13.3",
@@ -25,6 +28,7 @@
     "sonner": "1.7.4"
   },
   "devDependencies": {
+    "@types/leaflet": "1.9.12",
     "@types/node": "22.10.2",
     "@types/react": "18.3.18",
     "@types/react-dom": "18.3.5",

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, MenuItem, Paper, Stack, Table,
+import { Alert, Box, Tooltip, Button, Chip, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle, MenuItem, Paper, Stack, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import PictureAsPdfIcon from "@mui/icons-material/PictureAsPdf";
 import LockIcon from "@mui/icons-material/Lock";
@@ -119,7 +119,10 @@ export function OrderFormsTab({ districts }: RefData) {
               <TableCell align="right">{fmtM3(x.volume_m3)}</TableCell>
               <TableCell>{x.contract ?? "—"}{x.contract_type && <Typography variant="caption" display="block" color="text.secondary">
                 {t(`ct_${x.contract_type}` as MessageKey)}</Typography>}</TableCell>
-              <TableCell align="right">{x.price != null && x.contract_type !== "monthly" ? fmtMoney(x.price) : "—"}</TableCell>
+              <TableCell align="right">{x.price != null && x.contract_type !== "monthly" ? fmtMoney(x.price) : "—"}
+                {x.contract_type === "by_volume" && x.price_source === "contract" && <Tooltip title={t("inv_price_contract_hint")}>
+                  <Typography variant="caption" display="block" color="text.secondary" data-price-source="contract">{t("inv_price_contract")}</Typography>
+                </Tooltip>}</TableCell>
               <TableCell align="right" sx={{ fontWeight: 600 }}>{x.pending
                 ? <Chip size="small" label={t("of_pending")} sx={{ bgcolor: STAGE.yellow.bg, color: STAGE.yellow.ink, height: 20 }} />
                 : x.contract_type === "monthly"

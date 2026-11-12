@@ -1,0 +1,76 @@
+# csw-test: ochiq IP'siz. O'z MySQL va MinIO'si (prod bazaga ulanmaydi).
+# web faqat ichki VPC IP'da ochiladi (BIND_IP:8080) — csw-app'dagi edge nginx *.test.csw.uz'ni shu yerga proksi qiladi.
+# Ishga tushirish: deploy/README.md. Rasm versiyasi: ../deploy.sh <sha>
+name: csw-test
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      TZ: Asia/Tashkent
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci"]
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h localhost -u root"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+    logging: &logging
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+  minio:
+    # docker-compose.yml (lokal) bilan bir xil digest
+    image: cgr.dev/chainguard/minio@sha256:aea6c163749e1caca37f907976dcf337177ddf5f558808f2aa591618fd3a6eef
+    restart: unless-stopped
+    command: server /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    networks: [internal]
+    logging: *logging
+
+  api:
+    image: ${IMAGE_REPO:-ghcr.io/csw-ltd}/csw-crm-api:${IMAGE_TAG:?IMAGE_TAG kerak — deploy.sh orqali ishga tushiring}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_VERSION: ${IMAGE_TAG}
+      DATABASE_URL: mysql+aiomysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+      STORAGE_BACKEND: minio
+      MINIO_ENDPOINT: minio:9000
+      MINIO_SECURE: "false"
+      TZ: Asia/Tashkent
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    networks: [internal]
+    logging: *logging
+
+  web:
+    image: ${IMAGE_REPO:-ghcr.io/csw-ltd}/csw-crm-web:${IMAGE_TAG}
+    restart: unless-stopped
+    depends_on: [api]
+    ports:
+      - "${BIND_IP:?BIND_IP kerak (csw-test ichki VPC IP)}:8080:80"
+    networks: [internal]
+    logging: *logging
+
+networks:
+  internal:
+
+volumes:
+  mysql_data:
+  minio_data:

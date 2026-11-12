@@ -255,6 +255,13 @@ export interface RequestDetail extends RequestItem {
   events: { status: RequestStatus; note: string | null; actor_name: string | null; created_at: string }[];
 }
 
+/** STIR bo'yicha qidiruv natijasi (shartnoma ustasining birinchi qadami). */
+export interface StirLookup {
+  customer: { id: number; name: string; district_id: number; code: string } | null;
+  active_contract: { id: number; number: string; valid_from: string; valid_to: string } | null;
+  last_contract: { id: number; number: string; valid_from: string; valid_to: string } | null;
+}
+
 export interface Appeal {
   id: number;
   number: string | null;
@@ -276,6 +283,7 @@ export interface Appeal {
   reject_reason: string | null;
   customer_id: number | null;
   request_id: number | null;
+  contract_id?: number | null;
   created_at: string;
 }
 
@@ -291,7 +299,7 @@ export interface CompleteResult {
 }
 
 export interface ApiErrorBody {
-  error?: { code: string; message: string };
+  error?: { code: string; message: string; details?: Record<string, unknown> };
   detail?: unknown;
 }
 
@@ -332,7 +340,8 @@ export interface PaymentItem { id: number; customer_id: number; customer_name: s
 /** Buxgalteriya: oy ichida yashil bo'lgan buyurtma varaqasi (summa — amaldagi shartnoma bo'yicha) */
 export interface MonthForm { request_id: number; number: string; day: string; customer_id: number; customer_name: string; code: string | null;
   district_id: number; form_number: string | null; volume_m3: number; waste_kind: string | null; plate: string | null; closed_via: string | null;
-  contract: string | null; contract_type: ContractType | null; price: number | null; amount: number; pending?: boolean }
+  contract: string | null; contract_type: ContractType | null; price: number | null; amount: number; pending?: boolean;
+  price_source?: "tariff" | "contract" | null }
 export interface MonthFormCustomer { customer_id: number; name: string; code: string | null; district_id: number; forms: number; total: number;
   pending?: number; usage?: { contract: string; annual: number; used: number; pct: number; level: "ok" | "warn" | "over" } | null }
 export interface InvoiceItem { id: number; number: string; customer_id: number; customer_name: string | null; code: string | null; district_id: number | null;
@@ -345,7 +354,24 @@ export interface ProviderReq { id: number; name: string; code: string; region_id
 export type ContractStatus = "draft" | "signed" | "returned" | "approved";
 export interface Requisites { name: string; stir: string | null; director: string | null; phone: string | null; legal_address: string | null;
   address: string | null; bank: string | null; mfo: string | null; account: string | null; oked: string | null; cadastre: string | null;
-  is_rented?: boolean }
+  is_rented?: boolean; lat?: number | null; lng?: number | null; geofence?: Geofence | null }
+
+/** Obyekt chegarasi: radius (markaz — korxona nuqtasi) yoki poligon. */
+export type Geofence = { type: "circle"; radius: number } | { type: "polygon"; points: [number, number][] };
+
+/** GPS joylashuvni tasdiqlash navbati. */
+export interface LocationQueueItem {
+  customer: { id: number; name: string; code: string | null; stir: string | null; district_id: number; lat: number | null; lng: number | null;
+    geofence: Geofence | null; cadastre: string | null; legal_address: string | null; is_rented: boolean; location_status: string;
+    location_source: string | null };
+  contract: { id: number; number: string; status: string } | null;
+  entered_by: string | null;
+  state: "pending" | "missing";
+}
+
+/** Xodimning shaxsiy bildirishnomasi. */
+export interface NotificationItem { id: number; kind: string; message: string; params: Record<string, unknown> | null; actor: string | null;
+  ref_type: string | null; ref_id: number | null; read: boolean; created_at: string }
 export interface ContractDraft { customer_id: number; requisites: Requisites; type: ContractType; price: number | null; annual_volume: number | null;
   annual_trips: number | null; valid_from: string; valid_to: string; place: string; sign_method: "electronic" | "paper";
   existing?: { number: string; signed_on: string | null; platform?: string | null; platform_id?: string | null } | null; price_reason?: string | null }
@@ -357,7 +383,7 @@ export interface ContractItem { id: number; number: string | null; platform: str
   valid_from: string; valid_to: string; signed_on: string | null; place: string | null; sign_method: "electronic" | "paper" | null;
   has_scan: boolean; return_comment: string | null; signed_at: string | null; approved_at: string | null; created_at: string;
   total: number; vat: number; is_active: boolean; used_m3?: number; usage_pct?: number; usage_level?: "ok" | "warn" | "over";
-  customer: Requisites & { id: number; code: string | null; district_id: number } | null; events?: ContractEventItem[];
+  customer: Requisites & { id: number; code: string | null; district_id: number; location_status?: LocationStatus } | null; events?: ContractEventItem[];
   draft?: Partial<ContractDraft> & { requisites?: Requisites } | null; source?: "flow" | "manual" | "import"; awaiting_scan?: boolean; submitted_by?: string | null; tariff_price?: number | null; price_reason?: string | null }
 export interface ExistingContract { customer_id: number; number: string; platform?: string | null; platform_id?: string | null; type: ContractType;
   price?: number | null; annual_volume?: number | null; signed_on: string; valid_from: string; valid_to: string; sign_method: "electronic" | "paper" }

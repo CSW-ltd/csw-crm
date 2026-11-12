@@ -1,0 +1,34 @@
+# csw-db: prod MySQL. Port faqat VPC ichki IP'da (DB_BIND_IP); ufw faqat csw-app IP'sidan 3306'ga ruxsat beradi.
+# Zaxira: backup.sh (systemd timer, har tunda), tiklash: restore.sh. Batafsil: deploy/README.md
+name: csw-db
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      TZ: Asia/Tashkent
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --innodb-buffer-pool-size=${INNODB_BUFFER_POOL:-1G}
+      - --binlog-expire-logs-seconds=604800   # binlog 7 kun
+    ports:
+      - "${DB_BIND_IP:?DB_BIND_IP kerak (csw-db ichki VPC IP)}:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_ROOT_PASSWORD\" mysqladmin ping -h localhost -u root"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging:
+      driver: json-file
+      options: { max-size: "20m", max-file: "5" }
+
+volumes:
+  mysql_data:

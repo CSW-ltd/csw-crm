@@ -23,6 +23,7 @@ pdfplumber = "==0.11.4"
 xlrd = "==2.0.1"
 reportlab = "==4.2.5"  # statistika PDF eksporti (testlarda matnli PDF ham)
 httpx = "==0.28.1"  # SMS (Eskiz.uz) va testlar
+pyyaml = "==6.0.3"  # app.bootstrap: boshlang'ich foydalanuvchilar YAML fayli
 
 [dev-packages]
 pytest = "==8.3.4"

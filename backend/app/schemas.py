@@ -226,8 +226,21 @@ class CustomerOut(ORM):
     lat: float | None
     lng: float | None
     location_status: LocationStatus
+    location_source: str | None = None
+    geofence: dict | None = None
     missing_fields: list[str] = []  # 'stir', 'contract' — bo'lsa haydovchi biriktirilmaydi
     new_contract: bool = False  # oxirgi 30 kunda imzolangan shartnoma (GPS belgisi)
+
+    @field_validator("geofence", mode="before")
+    @classmethod
+    def _gf(cls, v):
+        if isinstance(v, str):
+            import json
+            try:
+                return json.loads(v)
+            except ValueError:
+                return None
+        return v
 
 
 class ContractOut(ORM):
@@ -559,6 +572,7 @@ class AppealOut(ORM):
     reject_reason: str | None
     customer_id: int | None
     request_id: int | None
+    contract_id: int | None = None
     created_at: datetime
 
 

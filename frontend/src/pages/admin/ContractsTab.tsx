@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, InputAdornment, LinearProgress, Paper, Stack, Table,
+import { Alert, Box, Button, Chip, Dialog, MenuItem, DialogActions, DialogContent, DialogTitle, InputAdornment, LinearProgress, Paper, Stack, Table,
   TableBody, TableCell, TableContainer, TableHead, TableRow, TextField, ToggleButton, ToggleButtonGroup, Typography } from "@mui/material";
 import SearchIcon from "@mui/icons-material/Search";
 import NoteAddIcon from "@mui/icons-material/NoteAdd";
@@ -218,6 +218,8 @@ function ContractView({ id, isLegal, isAcc, districts, startReturn, onClose, onC
   const pdfRef = useRef<HTMLInputElement>(null);
   const [askDelete, setAskDelete] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Elektron yangi shartnoma: buxgalter Didox'dagi imzoni tekshirib platforma, ID va sanani kiritadi
+  const [apr, setApr] = useState<{ platform: string; platform_id: string; signed_on: string } | null>(null);
   const fail = useCallback((e: unknown) => toast(tErr(errorCode(e), errorMessage(e)), "error"), [tErr]);
   useEffect(() => { contractsApi.get(id).then(setC).catch(fail); }, [id, fail]);
   const act = async (fn: () => Promise<ContractItem>, msg: MessageKey) => {
@@ -227,6 +229,7 @@ function ContractView({ id, isLegal, isAcc, districts, startReturn, onClose, onC
   const openDoc = (p: Promise<Blob>) => openBlob(p, fail);
   if (!c) return null;
   const needPdf = c.awaiting_scan && (c.source === "manual" || c.source === "import");
+  const needPlatform = c.sign_method === "electronic" && c.source !== "manual" && c.source !== "import";
   const cu = c.customer;
   const row = (k: MessageKey, v?: string | number | null) => <Box><Typography variant="caption" color="text.secondary">{t(k)}</Typography>
     <Typography variant="body2">{v ?? "—"}</Typography></Box>;
@@ -260,6 +263,20 @@ function ContractView({ id, isLegal, isAcc, districts, startReturn, onClose, onC
             {c.events?.map((e, i) => <Typography key={i} variant="body2" data-event={e.action}>
               {dt(e.at)} · <b>{t(`ce_ev_${e.action}` as MessageKey)}</b> · {e.actor ?? "—"}{e.comment ? ` — «${e.comment}»` : ""}</Typography>)}
           </Box>
+          {apr && <Stack spacing={1.5} id="ctr-approve-form" sx={{ p: 1.5, border: 2, borderColor: STAGE.green.bg, borderRadius: 1 }}>
+            <Typography fontWeight={700}>{t("ctr_approve_title")}</Typography>
+            <Typography variant="body2" color="text.secondary">{t("ctr_approve_hint")}</Typography>
+            <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+              <TextField size="small" select label={t("ctr_platform")} value={apr.platform} sx={{ minWidth: 160 }}
+                onChange={(e) => setApr({ ...apr, platform: e.target.value })}>
+                {(["didox", "hujjat", "soliq", "other"] as const).map((p) => <MenuItem key={p} value={p}>{t(`ctr_pl_${p}` as MessageKey)}</MenuItem>)}
+              </TextField>
+              <TextField size="small" id="ctr-approve-pid" required label={t("ctr_platform_id")} value={apr.platform_id} sx={{ flex: 1 }}
+                onChange={(e) => setApr({ ...apr, platform_id: e.target.value })} />
+              <TextField size="small" type="date" label={t("signed_on")} value={apr.signed_on} InputLabelProps={{ shrink: true }}
+                inputProps={{ max: new Date().toISOString().slice(0, 10) }} onChange={(e) => setApr({ ...apr, signed_on: e.target.value })} />
+            </Stack>
+          </Stack>}
           {ret !== null && <TextField id="ctr-return-comment" autoFocus multiline minRows={2} label={t("ctr_return_comment")} value={ret}
             onChange={(e) => setRet(e.target.value)} helperText={t("ctr_return_hint")} />}
         </Stack>
@@ -281,9 +298,15 @@ function ContractView({ id, isLegal, isAcc, districts, startReturn, onClose, onC
         <Box sx={{ flex: 1 }} />
         {isAcc && c.status === "signed" && (ret === null
           ? <>
-            <Button id="ctr-return" color="error" variant="outlined" startIcon={<UndoIcon />} onClick={() => setRet("")} disabled={busy}>{t("ctr_return")}</Button>
-            <Button id="ctr-approve" variant="contained" disableElevation startIcon={<CheckIcon />} disabled={busy}
-              onClick={() => act(() => contractsApi.approve(c.id), "ctr_approved_ok")} sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>
+            {!apr && <Button id="ctr-return" color="error" variant="outlined" startIcon={<UndoIcon />} onClick={() => setRet("")} disabled={busy}>{t("ctr_return")}</Button>}
+            {apr && <Button onClick={() => setApr(null)} disabled={busy}>{t("cancel")}</Button>}
+            <Button id="ctr-approve" variant="contained" disableElevation startIcon={<CheckIcon />}
+              disabled={busy || (!!apr && !apr.platform_id.trim())}
+              onClick={() => {
+                if (needPlatform && !apr) { setApr({ platform: "didox", platform_id: "", signed_on: new Date().toISOString().slice(0, 10) }); return; }
+                act(() => contractsApi.approve(c.id, apr ? { platform: apr.platform, platform_id: apr.platform_id.trim(), signed_on: apr.signed_on } : undefined),
+                  "ctr_approved_ok").then(() => setApr(null));
+              }} sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>
               {t("ctr_approve")}</Button>
           </>
           : <>

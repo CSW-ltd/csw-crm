@@ -1,8 +1,19 @@
 import { api } from "./client";
 import { clearTokens, saveTokens, type Tokens } from "@/lib/session";
 import { closeSocket } from "@/lib/socket";
-import type { ContractCheck, ContractDraft, ContractItem, ExistingImportResult, TariffOverview, InvoiceItem, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
+import type { ContractCheck, ContractDraft, ContractItem, StirLookup, Geofence, LocationQueueItem, NotificationItem, ExistingImportResult, TariffOverview, InvoiceItem, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
   ImportBatch, ImportResult, LocationStatus, Region, Role, SituationEvent, SituationLevel, User } from "@/types";
+
+export const locationsApi = {
+  queue: () => api.get<LocationQueueItem[]>("/gps/locations").then((r) => r.data),
+  confirm: (customerId: number, body: { lat: number; lng: number; geofence: Geofence; cadastre?: string | null; comment?: string | null }) =>
+    api.post(`/gps/locations/${customerId}/confirm`, body).then((r) => r.data),
+};
+
+export const notificationsApi = {
+  mine: () => api.get<{ unread: number; items: NotificationItem[] }>("/notifications").then((r) => r.data),
+  read: (ids?: number[]) => api.post("/notifications/read", { ids: ids ?? null }),
+};
 
 export const gpsApi = {
   newRequests: () => api.get<DriverTask[]>("/gps/requests").then((r) => r.data),
@@ -226,7 +237,15 @@ export const providersApi = {
 export const contractsApi = {
   check: (body: ContractDraft, id?: number) => api.post<ContractCheck>(id ? `/contracts/${id}/check` : "/contracts/check", body).then((r) => r.data),
   create: (body: ContractDraft) => api.post<ContractItem>("/contracts", body).then((r) => r.data),
-  start: (customer_id: number) => api.post<ContractItem>("/contracts/start", { customer_id }).then((r) => r.data),
+  start: (customer_id: number, appeal_id?: number) => api.post<ContractItem>("/contracts/start", { customer_id, appeal_id: appeal_id ?? null }).then((r) => r.data),
+  /** STIR bo'yicha korxona va amaldagi shartnoma (bo'lsa — qo'shimcha shartnoma taklifi). */
+  lookup: (stir: string) => api.get<StirLookup>("/contracts/lookup", { params: { stir } }).then((r) => r.data),
+  /** Mavjud kontragent: qo'shimcha shartnoma (buxgalterga), yangi filial yoki manzil (GPS'ga) so'rovi. */
+  request: (body: { stir: string; kind: "amendment" | "branch" | "address"; note?: string | null }) =>
+    api.post<{ id: number }>("/contracts/requests", body).then((r) => r.data),
+  /** Kontragent → korxona: STIR bazada bo'lsa o'sha, aks holda yangi korxona. */
+  counterparty: (body: { stir: string; name: string; district_id: number; phone?: string | null }) =>
+    api.post<{ id: number; name: string; district_id: number; code: string }>("/contracts/counterparty", body).then((r) => r.data),
   saveDraft: (id: number, body: ContractDraft) => api.put<ContractItem>(`/contracts/${id}/draft`, body).then((r) => r.data),
   createExisting: (body: ContractDraft) => api.post<ContractItem>("/contracts/existing", body).then((r) => r.data),
   existingTemplate: () => api.get<Blob>("/contracts/existing/template", { responseType: "blob" }).then((r) => r.data),
@@ -248,16 +267,17 @@ export const contractsApi = {
   document: (id: number, format: "pdf" | "docx") =>
     api.get<Blob>(`/contracts/${id}/document`, { params: { format }, responseType: "blob", timeout: 60_000 }).then((r) => r.data),
   scan: (id: number) => api.get<Blob>(`/contracts/${id}/scan`, { responseType: "blob" }).then((r) => r.data),
-  sign: (id: number, body: { signed_on: string; sign_method: string; platform?: string; platform_id?: string; file?: File | null }) => {
+  /** Legal: buxgalter tasdig'iga yuborish (qog'oz — sana va skan majburiy). */
+  sign: (id: number, body: { signed_on?: string; sign_method: string; file?: File | null }) => {
     const fd = new FormData();
-    fd.append("signed_on", body.signed_on);
+    if (body.signed_on) fd.append("signed_on", body.signed_on);
     fd.append("sign_method", body.sign_method);
-    if (body.platform) fd.append("platform", body.platform);
-    if (body.platform_id) fd.append("platform_id", body.platform_id);
     if (body.file) fd.append("file", body.file, body.file.name);
     return api.post<ContractItem>(`/contracts/${id}/sign`, fd, { timeout: 60_000 }).then((r) => r.data);
   },
-  approve: (id: number) => api.post<ContractItem>(`/contracts/${id}/approve`).then((r) => r.data),
+  /** Buxgalter: imzolanganini tasdiqlash (elektron — platforma, ID, kontragent imzolagan sana). */
+  approve: (id: number, body?: { platform?: string; platform_id?: string; signed_on?: string }) =>
+    api.post<ContractItem>(`/contracts/${id}/approve`, body ?? {}).then((r) => r.data),
   returnBack: (id: number, comment: string) => api.post<ContractItem>(`/contracts/${id}/return`, { comment }).then((r) => r.data),
 };
 

@@ -71,12 +71,42 @@ async def scan_upload(contract_id: int, file: UploadFile = File(...), user: User
 
 class StartIn(BaseModel):
     customer_id: int
+    appeal_id: int | None = None  # yangi korxona murojaatidan
 
 
 @router.post("/start", status_code=201)
 async def start(body: StartIn, user: User = Legal, db: AsyncSession = DB) -> dict:
     """Usta: korxona tanlandi — tugallanmagan loyiha (raqamsiz) yaratiladi."""
-    return svc.out(await svc.start(db, user, body.customer_id), with_events=True)
+    return svc.out(await svc.start(db, user, body.customer_id, body.appeal_id), with_events=True)
+
+
+@router.get("/lookup")
+async def lookup(stir: str = Query(pattern=r"^\d{9}$"), user: User = Legal, db: AsyncSession = DB) -> dict:
+    """STIR bo'yicha korxona va amaldagi shartnoma (bo'lsa — qo'shimcha shartnoma taklif qilinadi)."""
+    return await svc.lookup(db, user, stir)
+
+
+@router.post("/requests", status_code=201)
+async def create_request(body: svc.RequestIn, user: User = Legal, db: AsyncSession = DB) -> dict:
+    """Mavjud kontragent: qo'shimcha shartnoma (buxgalterga), yangi filial yoki manzil o'zgartirish (GPS'ga) so'rovi."""
+    r = await svc.create_request(db, user, body)
+    return {"id": r.id, "kind": r.kind, "status": r.status, "contract_id": r.contract_id, "customer_id": r.customer_id}
+
+
+@router.get("/requests")
+async def list_requests(kind: str | None = Query(None, pattern="^(amendment|branch|address)$"),
+                        status: str | None = Query(None, pattern="^(new|done|cancelled)$"),
+                        user: User = Depends(require_perm("customers.contract", "accounting.view", "requests.view")),
+                        db: AsyncSession = DB) -> list[dict]:
+    """So'rovlar navbati (buxgalter — qo'shimcha shartnoma, GPS — filial/manzil; 2–3-qismlarda bajariladi)."""
+    return await svc.list_requests(db, user, kind, status)
+
+
+@router.post("/counterparty", status_code=201)
+async def counterparty(body: svc.CounterpartyIn, user: User = Legal, db: AsyncSession = DB) -> dict:
+    """Kontragent → korxona: STIR bazada bo'lsa o'sha, aks holda rekvizitlardan yangi korxona."""
+    c = await svc.counterparty(db, user, body)
+    return {"id": c.id, "name": c.name, "district_id": c.district_id, "code": c.code}
 
 
 @router.put("/{contract_id}/draft")
@@ -123,10 +153,10 @@ async def document(contract_id: int, format: str = Query("pdf", pattern="^(pdf|d
 
 
 @router.post("/{contract_id}/sign")
-async def sign(contract_id: int, signed_on: date = Form(...), sign_method: str = Form(...), platform: str | None = Form(None),
+async def sign(contract_id: int, signed_on: date | None = Form(None), sign_method: str = Form(...), platform: str | None = Form(None),
                platform_id: str | None = Form(None, max_length=40), file: UploadFile | None = File(None), user: User = Legal,
                db: AsyncSession = DB, storage: Storage = Depends(get_storage)) -> dict:
-    """«Imzolandi — buxgalteriyaga yuborish». Shu paytdan shartnoma faol (murojaat ochiladi), hisob-kitob — buxgalter tasdig'idan keyin."""
+    """«Buxgalterga yuborish»: imzo usuli (qog'oz — skan PDF va sana). Imzolanganini faqat buxgalter tasdiqlaydi; tasdiqqacha faol emas."""
     f = (await file.read(), file.content_type or "", file.filename or "") if file and file.filename else None
     return svc.out(await svc.sign(db, storage, user, contract_id, signed_on, sign_method, platform, platform_id, f), with_events=True)
 
@@ -142,8 +172,8 @@ class ReturnIn(BaseModel):
 
 
 @router.post("/{contract_id}/approve")
-async def approve(contract_id: int, user: User = Accountant, db: AsyncSession = DB) -> dict:
-    return svc.out(await svc.approve(db, user, contract_id), with_events=True)
+async def approve(contract_id: int, body: svc.ApproveIn | None = None, user: User = Accountant, db: AsyncSession = DB) -> dict:
+    return svc.out(await svc.approve(db, user, contract_id, body), with_events=True)
 
 
 @router.post("/{contract_id}/return")

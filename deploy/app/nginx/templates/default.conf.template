@@ -1,0 +1,128 @@
+# edge nginx (csw-app). Hostlar .env'dan (nginx templates/envsubst): SITE_HOST, ADMIN_HOST, PORTAL_HOSTS, TEST_HOSTS,
+# CERT_NAME, TEST_UPSTREAM. DNS'da wildcard (*.csw.uz) bor — shuning uchun faqat ro'yxatdagi nomlar ochiladi, qolgani 444.
+# Sertifikat: bitta Let's Encrypt (HTTP-01) barcha nomlar uchun — /etc/letsencrypt/live/${CERT_NAME}/.
+
+limit_req_zone $binary_remote_addr zone=login:10m rate=10r/m;
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+# --- 80: noma'lum host — yopiladi; ma'lum hostlar — ACME va https'ga yo'naltirish ---
+server {
+    listen 80 default_server;
+    server_name _;
+    return 444;
+}
+
+server {
+    listen 80;
+    server_name ${SITE_HOST} www.${SITE_HOST} ${ADMIN_HOST} ${PORTAL_HOSTS} ${TEST_HOSTS};
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# --- 443: noma'lum host (IP orqali skanerlar, wildcard DNS) — TLS handshake rad etiladi ---
+server {
+    listen 443 ssl default_server;
+    ssl_reject_handshake on;
+}
+
+# --- Landing: csw.uz ("tez orada"); faqat ochiq faktura havolalari api'ga o'tadi ---
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name www.${SITE_HOST};
+    ssl_certificate     /etc/letsencrypt/live/${CERT_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${CERT_NAME}/privkey.pem;
+    include /etc/nginx/templates/_common.inc;
+    return 301 https://${SITE_HOST}$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${SITE_HOST};
+    ssl_certificate     /etc/letsencrypt/live/${CERT_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${CERT_NAME}/privkey.pem;
+    include /etc/nginx/templates/_common.inc;
+    root /usr/share/nginx/landing;
+
+    location /api/v1/public/ {
+        proxy_pass http://web:80;
+        include /etc/nginx/templates/_proxy.inc;
+    }
+    location / {
+        try_files $uri /index.html;
+    }
+}
+
+# --- Admin: faqat ruxsat etilgan IP'lardan (admin-allow.conf — faqat serverda, repoda .example) ---
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${ADMIN_HOST};
+    ssl_certificate     /etc/letsencrypt/live/${CERT_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${CERT_NAME}/privkey.pem;
+    include /etc/nginx/templates/_common.inc;
+    include /etc/nginx/admin-allow.conf;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+
+    location / {
+        proxy_pass http://web:80;
+        include /etc/nginx/templates/_proxy.inc;
+    }
+    location = /api/v1/auth/login {
+        limit_req zone=login burst=10 nodelay;
+        proxy_pass http://web:80;
+        include /etc/nginx/templates/_proxy.inc;
+    }
+}
+
+# --- Rol portallari (manager, legal, account, ...): rol tekshiruvi backend'da (ROLE_HOSTS) ---
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${PORTAL_HOSTS};
+    ssl_certificate     /etc/letsencrypt/live/${CERT_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${CERT_NAME}/privkey.pem;
+    include /etc/nginx/templates/_common.inc;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+
+    location / {
+        proxy_pass http://web:80;
+        include /etc/nginx/templates/_proxy.inc;
+    }
+    location = /api/v1/auth/login {
+        limit_req zone=login burst=10 nodelay;
+        proxy_pass http://web:80;
+        include /etc/nginx/templates/_proxy.inc;
+    }
+}
+
+# --- Test portallari (*.test.csw.uz) → csw-test (ichki IP) ---
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${TEST_HOSTS};
+    ssl_certificate     /etc/letsencrypt/live/${CERT_NAME}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${CERT_NAME}/privkey.pem;
+    include /etc/nginx/templates/_common.inc;
+    add_header X-Robots-Tag "noindex, nofollow" always;
+
+    location / {
+        proxy_pass http://${TEST_UPSTREAM};
+        include /etc/nginx/templates/_proxy.inc;
+    }
+    location = /api/v1/auth/login {
+        limit_req zone=login burst=10 nodelay;
+        proxy_pass http://${TEST_UPSTREAM};
+        include /etc/nginx/templates/_proxy.inc;
+    }
+}

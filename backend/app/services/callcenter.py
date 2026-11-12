@@ -177,14 +177,11 @@ async def create_appeal(db: AsyncSession, actor: User, body: AppealIn) -> Appeal
 
 
 async def create_new_company(db: AsyncSession, actor: User, body) -> Appeal:
-    """Yangi korxona: karta "shartnoma kutilmoqda" holatida ochiladi, maxsus raqam beriladi va telefonga SMS ketadi.
-    Murojaat yuridik bo'lim navbatiga tushadi; shartnoma bo'lmaguncha GPS ko'rmaydi."""
-    from app.models import CustomerContact
+    """Yangi korxona qo'ng'irog'i: korxona YARATILMAYDI (korxona = shartnoma kontragenti). Murojaat yuridik bo'lim oynasida
+    «Yangi shartnomaga yo'naltirilgan» bo'lib turadi; yurist undan shartnoma boshlaydi, shartnoma raqam olganda murojaat yopiladi."""
     from app.repositories import customers as cust_repo
-    from app.services import sms
-    from app.services.customer_import import next_fixed_no_start
     from app.services.customer_service import stir_taken
-    from app.services.normalize import key, phone_digits
+    from app.services.normalize import phone_digits
     if len(phone_digits(body.phone)) != 9:
         raise invalid("bad_phone", "Telefon raqami 9 xonali bo'lishi kerak (masalan, 94 512 11 16)")
     other = await cust_repo.by_stir(db, body.stir)
@@ -201,21 +198,12 @@ async def create_new_company(db: AsyncSession, actor: User, body) -> Appeal:
         raise not_found("district")
     access.check_scope(actor, d.id)
     phone = format_phone(body.phone)
-    name = f"Yangi korxona (STIR {body.stir})"
-    cust = Customer(fixed_no=f"A-{await next_fixed_no_start(db):04d}", name=name, name_key=key(name), district_id=d.id,
-                    stir=body.stir, phone=phone, source="call")
-    db.add(cust)
-    await db.flush()
-    db.add(CustomerContact(customer_id=cust.id, name=body.contact_name.strip(), phone=phone))
-    a = Appeal(district_id=d.id, org_name=name, stir=body.stir, caller_name=body.contact_name.strip(), caller_phone=phone,
-               waste_type=body.waste_type, created_by_id=actor.id, customer_id=cust.id)
+    a = Appeal(district_id=d.id, org_name=f"Yangi korxona (STIR {body.stir})", stir=body.stir, caller_name=body.contact_name.strip(),
+               caller_phone=phone, waste_type=body.waste_type, created_by_id=actor.id)
     db.add(a)
     await db.flush()
     a.number = f"MR-{a.id:06d}"
-    code = cust.code
     await db.commit()
-    sms.send_later(phone, f"Korxonangiz maxsus raqami: {code}. Chiqindi olib ketish uchun murojaat qilganda shu raqamni ayting. "
-                          "Bu raqamni boshqa hech kimga aytmang.")
     await _appeal_broadcast(a)
     return a
 

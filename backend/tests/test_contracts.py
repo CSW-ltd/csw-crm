@@ -26,7 +26,8 @@ async def tariffs(world, sessionmaker):
         await s.commit()
 REQ = {"name": "\"Yangi Test\" MChJ", "stir": "309111222", "director": "Aliyev Vali", "phone": "90 123 45 67",
        "legal_address": "Asaka sh., Bog'bon ko'chasi 5", "address": "Asaka sh., Bog'bon ko'chasi 5", "bank": "DEMO bank",
-       "mfo": "00873", "account": "20208000900123456001", "oked": "56290", "cadastre": "17:15:41:01:02:0001"}
+       "mfo": "00873", "account": "20208000900123456001", "oked": "56290", "cadastre": "17:15:41:01:02:0001",
+       "lat": 40.6415, "lng": 72.2390}
 
 
 def body(cid, **kw):
@@ -74,38 +75,39 @@ async def test_full_flow(world, client_factory, sessionmaker):
     text = "\n".join(p.text for p in Document(io.BytesIO(dx.content)).paragraphs)
     assert "OMMAVIY SHARTNOMA" in text and "Sakkiz million" in text and REQ["cadastre"] in text
     # Ikkinchi loyiha ustma-ust tushadi — faqat imzolangandan keyin; loyiha ustma-ust hisoblanmaydi
-    # Imzolash: elektron — platforma va ID majburiy
-    sign = {"signed_on": str(T), "sign_method": "electronic", "platform": "didox"}
-    r = await legal.post(f"/api/v1/contracts/{ct['id']}/sign", data=sign)
-    assert r.json()["error"]["code"] == "platform_required"
-    r = await legal.post(f"/api/v1/contracts/{ct['id']}/sign", data={**sign, "platform_id": "e0f94e102ced"},
+    # Legal buxgalterga yuboradi (elektron): platforma/ID legal'dan olinmaydi; tasdiqqacha faol emas
+    sign = {"sign_method": "electronic"}
+    r = await legal.post(f"/api/v1/contracts/{ct['id']}/sign", data={**sign, "platform": "didox", "platform_id": "e0f94e102ced"},
                          files={"file": ("imzolangan.pdf", b"%PDF-1.4 test", "application/pdf")})
     assert r.status_code == 200, r.text
     ct = r.json()
-    assert ct["status"] == "signed" and ct["is_active"] and ct["display_number"] == "e0f94e102ced" and ct["has_scan"]
+    assert ct["status"] == "signed" and not ct["is_active"] and ct["platform_id"] is None and ct["has_scan"]
     assert (await legal.get(f"/api/v1/contracts/{ct['id']}/scan")).content == b"%PDF-1.4 test"
-    # Imzolangan shartnoma o'zgartirilmaydi; yangi ustma-ust shartnoma — xato
+    # Yuborilgan shartnoma o'zgartirilmaydi; yangi ustma-ust shartnoma — xato (tasdiq kutayotgani ham hisobga olinadi)
     assert (await legal.put(f"/api/v1/contracts/{ct['id']}", json=body(cid))).json()["error"]["code"] == "contract_locked"
     r = (await legal.post("/api/v1/contracts/check", json=body(cid))).json()
     assert {"field": "valid_from", "code": "overlap"} in r["errors"]
-    # Korxona endi faol: GPS kartasida «Yangi shartnoma»
-    c = (await legal.get(f"/api/v1/customers/{cid}")).json()
-    assert c["missing_fields"] == [] and c["new_contract"] is True
     # Buxgalter navbati; legal tasdiqlay olmaydi
     q = (await acc.get("/api/v1/contracts", params={"status": "signed"})).json()
     assert any(x["id"] == ct["id"] for x in q["items"])
     assert (await legal.post(f"/api/v1/contracts/{ct['id']}/approve")).status_code == 403
     assert (await gps.get("/api/v1/contracts")).status_code == 403
-    # Qaytarish (izoh bilan) → legal tuzatadi → qayta yuboradi → tasdiq
+    # Qaytarish (izoh bilan) → legal tuzatadi → qayta yuboradi
     r = (await acc.post(f"/api/v1/contracts/{ct['id']}/return", json={"comment": "Narx noto'g'ri"})).json()
-    assert r["status"] == "returned" and r["return_comment"] == "Narx noto'g'ri" and r["is_active"]
+    assert r["status"] == "returned" and r["return_comment"] == "Narx noto'g'ri" and not r["is_active"]
     r = await legal.put(f"/api/v1/contracts/{ct['id']}", json=body(cid, annual_volume=120))
     assert r.status_code == 200 and r.json()["price"] == 84000 and r.json()["annual_volume"] == 120
-    r = (await legal.post(f"/api/v1/contracts/{ct['id']}/sign", data={**sign, "platform_id": "e0f94e102ced"})).json()
+    r = (await legal.post(f"/api/v1/contracts/{ct['id']}/sign", data=sign)).json()
     assert r["status"] == "signed" and r["return_comment"] is None
-    r = (await acc.post(f"/api/v1/contracts/{ct['id']}/approve")).json()
-    assert r["status"] == "approved"
+    # Buxgalter: elektron — platforma va ID majburiy; tasdiqlangach faol, raqam — platforma ID
+    r = (await acc.post(f"/api/v1/contracts/{ct['id']}/approve", json={})).json()
+    assert r["error"]["code"] == "platform_required"
+    r = (await acc.post(f"/api/v1/contracts/{ct['id']}/approve", json={"platform": "didox", "platform_id": "e0f94e102ced",
+                                                                       "signed_on": str(T)})).json()
+    assert r["status"] == "approved" and r["is_active"] and r["display_number"] == "e0f94e102ced" and r["signed_on"] == str(T)
     assert [e["action"] for e in r["events"]] == ["created", "signed", "returned", "edited", "resubmitted", "approved"]
+    c = (await legal.get(f"/api/v1/customers/{cid}")).json()
+    assert c["missing_fields"] == [] and c["new_contract"] is True
 
 
 async def test_pending_not_billed_until_approved(world, client_factory, sessionmaker):

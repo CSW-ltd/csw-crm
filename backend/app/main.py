@@ -1,17 +1,18 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
 
 import socketio
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1 import accounting, admin, auth, callcenter, contracts, customers, driver, gps, integrations, orders, situation, tariffs
+from app.api.v1 import accounting, admin, auth, callcenter, contracts, customers, driver, gps, integrations, orders, situation, tariffs, notifications
 from app.core.config import get_settings
 from app.core.errors import AppError, app_error_handler
+from app.db.session import get_session
 from app.middleware import CsrfHeaderMiddleware, RequestContextMiddleware
 from app.realtime import sio
 from app.services.storage import MemoryStorage, MinioStorage
@@ -52,6 +53,7 @@ async def _overdue_watch() -> None:
 
 def create_app(storage=None) -> FastAPI:
     s = get_settings()
+    s.check_production()
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -69,31 +71,19 @@ def create_app(storage=None) -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=s.cors_list, allow_credentials=True,
                        allow_methods=["*"], allow_headers=["*"], expose_headers=["X-Request-ID"])
     for r in (auth.router, driver.router, gps.router, admin.router, customers.router, situation.router, callcenter.router,
-              orders.router, integrations.router, accounting.router, accounting.public_router, contracts.router, tariffs.router):
+              orders.router, integrations.router, accounting.router, accounting.public_router, contracts.router, tariffs.router, notifications.router):
         app.include_router(r, prefix="/api/v1")
 
-    @app.get("/api/health", tags=["system"])
-    async def health():
-        return {"status": "ok"}
-
-    if s.static_dir:
-        _mount_spa(app, Path(s.static_dir))
+    @app.get("/api/v1/health", tags=["system"])
+    async def health_v1(db: AsyncSession = Depends(get_session)):
+        """Deploy va monitoring uchun: ilova + baza. Baza javob bermasa 503."""
+        try:
+            await db.execute(text("SELECT 1"))
+        except Exception:  # noqa: BLE001
+            log.exception("health: database unavailable")
+            return JSONResponse({"status": "error", "db": "down", "version": s.app_version}, status_code=503)
+        return {"status": "ok", "db": "ok", "version": s.app_version}
     return app
-
-
-def _mount_spa(app: FastAPI, root: Path) -> None:
-    """Demo/preview: React build'ini shu server beradi; noma'lum yo'llar index.html ga (client-side routing)."""
-    index = root / "index.html"
-    app.mount("/assets", StaticFiles(directory=root / "assets"), name="assets")
-
-    @app.get("/{path:path}", include_in_schema=False)
-    async def spa(path: str):
-        if path.startswith("api/"):
-            raise AppError(404, "not_found", "Topilmadi")
-        f = (root / path).resolve()
-        if path and f.is_file() and root.resolve() in f.parents:
-            return FileResponse(f)
-        return FileResponse(index, headers={"Cache-Control": "no-cache"})
 
 
 app = create_app()

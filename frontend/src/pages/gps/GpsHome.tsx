@@ -7,7 +7,8 @@ import ArrowUpIcon from "@mui/icons-material/ArrowUpward";
 import DeleteIcon from "@mui/icons-material/DeleteOutline";
 import ExpandIcon from "@mui/icons-material/ExpandMore";
 import PrintIcon from "@mui/icons-material/Print";
-import { gpsApi, requestsApi } from "@/api/endpoints";
+import { locationsApi, gpsApi, requestsApi } from "@/api/endpoints";
+import { LocationsTab } from "./LocationsTab";
 import { errorCode, errorMessage } from "@/api/client";
 import { OrderPaperDialog } from "@/components/OrderPaper";
 import { SoundToggle, useAlertSound, useNewItemsSignal, useNow } from "@/components/Stage";
@@ -38,7 +39,9 @@ export function GpsHome() {
   const { t, tErr } = useI18n();
   const now = useNow();
   const sound = useAlertSound();
-  const [tab, setTab] = usePersisted<"red" | "yellow" | "schedule">("gps.tab", "red");
+  const [tab, setTab] = usePersisted<"red" | "yellow" | "schedule" | "locations">("gps.tab", "red");
+  const [locCount, setLocCount] = useState(0);
+  useEffect(() => { locationsApi.queue().then((r) => setLocCount(r.length)).catch(() => undefined); }, []);
   const [red, setRed] = useState<DriverTask[]>([]);
   const [yellow, setYellow] = useState<RequestItem[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -92,6 +95,7 @@ export function GpsHome() {
         <Tab value="red" id="gps-tab-red" label={<Badge color="error" badgeContent={red.length} sx={{ pr: 1.5 }}>{t("gps_tab_red")}</Badge>} />
         <Tab value="yellow" id="gps-tab-yellow" label={<Badge color="warning" badgeContent={yellow.length} sx={{ pr: 1.5 }}>{t("gps_tab_yellow")}</Badge>} />
         <Tab value="schedule" id="gps-tab-schedule" label={t("gps_tab_schedule")} />
+        <Tab value="locations" id="gps-tab-locations" label={<Badge color="warning" badgeContent={locCount} sx={{ pr: 1.5 }}>{t("gps_tab_locations")}</Badge>} />
       </Tabs>
 
       {tab === "red" && <Stack spacing={1.5}>
@@ -135,6 +139,7 @@ export function GpsHome() {
       </Stack>}
 
       {tab === "schedule" && <ScheduleSection />}
+      {tab === "locations" && <LocationsTab onCount={setLocCount} />}
       {paper && <OrderPaperDialog formId={paper} onClose={() => setPaper(null)} onChanged={() => load().catch(() => undefined)} />}
     </Stack>
   );

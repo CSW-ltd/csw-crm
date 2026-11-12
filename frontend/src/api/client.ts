@@ -47,6 +47,11 @@ export function errorCode(e: unknown): string {
   return ax.response.data?.error?.code ?? (ax.response.status === 422 ? "validation" : "unknown");
 }
 
+/** Xato tafsilotlari (masalan wrong_portal → {home: "legal.csw.uz"}). */
+export function errorDetails(e: unknown): Record<string, unknown> | undefined {
+  return (e as AxiosError<ApiErrorBody>).response?.data?.error?.details;
+}
+
 export function errorMessage(e: unknown): string | undefined {
   return (e as AxiosError<ApiErrorBody>).response?.data?.error?.message;
 }

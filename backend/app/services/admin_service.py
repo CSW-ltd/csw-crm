@@ -6,6 +6,7 @@ admin Vaziyat paneliga "eski → yangi" ko'rinishida yoziladi. Manager yaratgan 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.errors import conflict, forbidden, invalid, not_found
 from app.core.permissions import ALL_CODES, MULTI_DISTRICT_ROLES, SINGLE_DISTRICT_ROLES, STAFF_ROLES, template
 from app.core.security import hash_password
@@ -100,6 +101,8 @@ async def list_users(db: AsyncSession, actor: User, role: Role | None, district_
 async def create_user(db: AsyncSession, actor: User, body: UserCreateIn) -> User:
     if not access.is_admin(actor) and body.role not in STAFF_ROLES:
         raise forbidden("Manager faqat GPS xodimi, yurist, operator yoki haydovchi qo'sha oladi")
+    if not get_settings().role_active(body.role.value):
+        raise invalid("role_inactive", "Bu rol hozircha faol emas")
     if await users_repo.by_username(db, body.username):
         raise conflict("username_taken", "Bu login band")
     district_id, district_ids = await _resolve_districts(db, actor, body.role, body.district_id, body.district_ids)

@@ -27,7 +27,7 @@ ROLE_TEMPLATES: dict[Role, list[str]] = {
                    "requests.view", "stats.view", "orders.view", "orders.unlock", "accounting.view"],
     Role.legal: ["customers.view", "customers.create", "customers.edit", "customers.contract", "customers.existing_price", "appeals.view", "appeals.review",
                  "requests.view", "orders.view", "orders.close", "accounting.view"],
-    Role.gps: ["customers.view", "requests.view", "orders.view", "orders.print"],
+    Role.gps: ["customers.view", "customers.location_confirm", "requests.view", "orders.view", "orders.print"],
     Role.operator: ["customers.view", "requests.view", "requests.create", "appeals.view", "appeals.create",
                     "orders.view"],
     Role.driver: [],

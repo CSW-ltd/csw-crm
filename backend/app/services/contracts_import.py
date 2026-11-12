@@ -19,6 +19,7 @@ from app.db.base import utcnow
 from app.models import Contract, ContractEvent, Customer, District, User
 from app.models.enums import ContractType, LocationStatus
 from app.services import access, situation
+from app.services.geo import coords_error
 from app.services.tariffs import price_for
 from app.services.customer_service import _check_stir
 from app.services.normalize import format_phone, key as name_key
@@ -61,7 +62,8 @@ COLUMNS = [("district", "Tuman / shahar", 22), ("name", "Korxona nomi", 32), ("s
            ("platform_id", "Platforma ID (Didox / hujjat.uz)", 22), ("type", "Turi (kub / reys / oylik)", 14),
            ("price", "Narx, QQS bilan (shartnomadagi)", 16), ("price_reason", "Narx sababi (ta'rifdan farq qilsa)", 30),
            ("annual_volume", "Yillik hajm, m³", 12),
-           ("signed_on", "Imzolangan sana", 14), ("valid_from", "Boshlanish", 13), ("valid_to", "Tugash", 13)]
+           ("signed_on", "Imzolangan sana", 14), ("valid_from", "Boshlanish", 13), ("valid_to", "Tugash", 13),
+           ("lat", "Kenglik (ixtiyoriy)", 13), ("lng", "Uzunlik (ixtiyoriy)", 13)]
 
 
 def template_xlsx() -> bytes:
@@ -74,7 +76,7 @@ def template_xlsx() -> bytes:
         ws.column_dimensions[c.column_letter].width = width
     sample = ["Asaka tumani", "\"Namuna\" MChJ", "300000000", "Namuna Direktor", "90 123 45 67", "Asaka, Namuna ko'chasi 1",
               "Asaka, Namuna ko'chasi 1", "DEMO bank", "00000", "20208000000000000000", "56290", "1234", "", "kub", "75000", "2025 yilgi shartnoma, eski ta'rif", "120",
-              "01.03.2026", "01.03.2026", "31.12.2026"]
+              "01.03.2026", "01.03.2026", "31.12.2026", "40.6415", "72.2390"]
     for i, v in enumerate(sample, start=1):
         ws.cell(row=2, column=i, value=v).font = Font(italic=True, color="888888")
     ws.freeze_panes = "A2"
@@ -146,6 +148,7 @@ async def import_file(db: AsyncSession, actor: User, file_name: str, content: by
         ctype = TYPES.get(str(g("type") or "kub").strip().lower())
         vf, vt, signed = _date(g("valid_from")), _date(g("valid_to")), _date(g("signed_on"))
         price, volume = _dec(g("price")), _dec(g("annual_volume"))
+        lat, lng = _dec(g("lat")), _dec(g("lng"))
         err = None
         if not d:
             err = "district_not_found"
@@ -175,6 +178,10 @@ async def import_file(db: AsyncSession, actor: User, file_name: str, content: by
             err = "bad_date"
         elif ctype == ContractType.by_volume and not volume:
             err = "volume_required"
+        elif (lat is None) != (lng is None):
+            err = "coords_pair"  # koordinata ixtiyoriy, lekin ikkalasi birga
+        elif lat is not None and coords_error(float(lat), float(lng)):
+            err = f"coords_{coords_error(float(lat), float(lng))}"
         tariff, reason = None, str(g("price_reason") or "").strip() or None
         if not err and ctype == ContractType.by_volume:
             # Kub: ruxsat bo'lsa — shartnomadagi (eski) narx majburiy, ta'rifdan farq qilsa sababi bilan; aks holda — ta'rif
@@ -207,6 +214,7 @@ async def import_file(db: AsyncSession, actor: User, file_name: str, content: by
                                              "legal_address": str(g("legal_address") or "").strip() or None,
                                              "address": str(g("address") or "").strip() or None, "bank": str(g("bank") or "").strip() or None,
                                              "mfo": mfo or None, "account": account or None, "oked": _digits(g("oked")) or None},
+                     "_coords": (float(lat), float(lng)) if lat is not None else None,
                      "_contract": (str(g("platform_id") or "").strip() or None, price, volume, signed or vf,
                                    tariff, reason if tariff is None or price != tariff else None)})
     if header is None:
@@ -228,6 +236,10 @@ async def import_file(db: AsyncSession, actor: User, file_name: str, content: by
                     setattr(cust, k, v)
             if r["stir"] and not cust.stir:
                 cust.stir = r["stir"]
+            if r["_coords"] and cust.location_status != LocationStatus.confirmed:
+                # Exceldagi nuqta — shartnomadagi kabi «kutilmoqda» (manba legal); tasdiqlangan nuqtaga tegilmaydi
+                cust.lat, cust.lng = r["_coords"]
+                cust.location_status, cust.location_source = LocationStatus.pending, "legal"
             pid, price, volume, signed, tariff, reason = r["_contract"]
             c = _make(cust.id, actor, r["number"], "didox" if pid else None, pid, ContractType(r["type"]), price, volume, signed,
                       r["valid_from"], r["valid_to"], "electronic" if pid else "paper", "import")

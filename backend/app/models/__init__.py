@@ -174,6 +174,12 @@ class Customer(TimestampMixin, Base):
     lat: Mapped[float | None] = mapped_column(Float)
     lng: Mapped[float | None] = mapped_column(Float)
     location_status: Mapped[LocationStatus] = mapped_column(enum_col(LocationStatus), default=LocationStatus.none, server_default="none")
+    # Koordinata kim tomonidan: legal (shartnomada) | driver (birinchi tashrif) | manager (tasdiq/qo'lda)
+    location_source: Mapped[str | None] = mapped_column(String(10))
+    # Obyekt chegarasi (JSON: circle radius yoki polygon nuqtalari) va uni tasdiqlagan GPS xodimi
+    geofence: Mapped[str | None] = mapped_column(Text)
+    location_confirmed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    location_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime)
     source: Mapped[str] = mapped_column(String(10), default="manual", server_default="manual")
     import_batch_id: Mapped[int | None] = mapped_column(ForeignKey("import_batches.id"))
     district: Mapped[District] = relationship()
@@ -379,6 +385,39 @@ class Appeal(TimestampMixin, Base):
     reject_reason: Mapped[str | None] = mapped_column(String(500))
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
     request_id: Mapped[int | None] = mapped_column(ForeignKey("requests.id"))
+    # Yangi korxona: yurist shu murojaatdan shartnoma boshladi; shartnoma raqam olganda murojaat yopiladi
+    contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id"))
+
+
+class ContractRequest(TimestampMixin, Base):
+    """Mavjud kontragent bo'yicha so'rov (yangi shartnoma o'rniga): amendment — qo'shimcha shartnoma (buxgalterga),
+    branch — yangi filial, address — manzilni o'zgartirish (GPS'ga). Holat: new → done | cancelled."""
+    __tablename__ = "contract_requests"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10), index=True)
+    status: Mapped[str] = mapped_column(String(10), default="new", index=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
+    contract_id: Mapped[int | None] = mapped_column(ForeignKey("contracts.id"))
+    district_id: Mapped[int] = mapped_column(ForeignKey("districts.id"), index=True)
+    note: Mapped[str | None] = mapped_column(String(500))
+    data: Mapped[str | None] = mapped_column(Text)  # JSON: bajarilganda (narx, Didox ID, filial/manzil ma'lumotlari)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    handled_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    handled_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class Notification(TimestampMixin, Base):
+    """Xodimga shaxsiy bildirishnoma (masalan, GPS joylashuvni o'zgartirdi — shartnomani kiritgan legal'ga)."""
+    __tablename__ = "notifications"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    message: Mapped[str] = mapped_column(String(500))
+    params: Mapped[str | None] = mapped_column(Text)  # JSON: tarjima uchun qiymatlar
+    actor_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    ref_type: Mapped[str | None] = mapped_column(String(20))
+    ref_id: Mapped[int | None] = mapped_column(Integer)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class WorkSchedule(TimestampMixin, Base):

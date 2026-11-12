@@ -20,9 +20,10 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.core.errors import AppError, conflict, invalid, not_found
 from app.db.base import utcnow
-from app.models import Contract, ContractEvent, Customer, District, Provider, User
-from app.models.enums import ContractType
+from app.models import Appeal, Contract, ContractEvent, ContractRequest, Customer, District, Provider, User
+from app.models.enums import AppealStatus, ContractType, LocationStatus
 from app.services import access, billing, contract_templates, tariffs
+from app.services.geo import coords_error, geofence_error
 from app.services.billing import local_day
 from app.services.customer_service import _check_stir
 from app.services.invoice_pdf import words_uz
@@ -49,6 +50,10 @@ class Requisites(BaseModel):
     oked: str | None = Field(None, max_length=10)
     cadastre: str | None = Field(None, max_length=40)
     is_rented: bool = False  # obyekt ijarada (shartnoma 10.3-bandi)
+    # Obyekt koordinatasi (ixtiyoriy — joylashuvni GPS oynasi to'ldiradi): yurist kiritsa — «kutilmoqda», tashrif yoki manager tasdiqlaydi
+    lat: float | None = Field(None, ge=-90, le=90)
+    lng: float | None = Field(None, ge=-180, le=180)
+    geofence: dict | None = None  # {"type": "circle", "radius": m} | {"type": "polygon", "points": [[lat, lng], ...]} — ixtiyoriy
 
 
 class ExistingMeta(BaseModel):
@@ -125,7 +130,8 @@ def _err(field: str, code: str) -> dict:
 
 
 async def _overlap(db: AsyncSession, customer_id: int, vf: date, vt: date, own_id: int | None) -> Contract | None:
-    q = select(Contract).where(Contract.customer_id == customer_id, Contract.status.in_(LIVE), Contract.is_active.is_(True),
+    # Buxgalter tasdig'ini kutayotgani ham (hali faol emas) — ustma-ust shartnoma bo'lmasin
+    q = select(Contract).where(Contract.customer_id == customer_id, Contract.status.in_(LIVE),
                                Contract.valid_from <= vt, Contract.valid_to >= vf)
     if own_id:
         q = q.where(Contract.id != own_id)
@@ -133,7 +139,10 @@ async def _overlap(db: AsyncSession, customer_id: int, vf: date, vt: date, own_i
 
 
 async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id: int | None = None,
-                   existing_src: bool = False) -> tuple[Customer, list[dict]]:
+                   existing_src: bool = False, fresh: bool = False) -> tuple[Customer, list[dict]]:
+    """fresh — yangi shartnoma raqam olmoqda: boshlanish sanasi = bugun (qo'lda o'zgartirilmaydi)."""
+    if fresh and not body.existing:
+        body.valid_from = local_day(utcnow())
     cust = await db.get(Customer, body.customer_id)
     if not cust:
         raise not_found("customer")
@@ -208,15 +217,23 @@ async def validate(db: AsyncSession, actor: User, body: ContractDraftIn, own_id:
             errs.append(_err("valid_from", "overlap"))
     if not (body.place or "").strip():
         errs.append(_err("place", "required"))
+    if (r.lat is not None or r.lng is not None) and (code := coords_error(r.lat, r.lng)):
+        errs.append(_err("coords", code))  # ixtiyoriy, lekin kiritilsa — to'g'ri bo'lsin
+    if r.geofence is not None:
+        if r.lat is None or r.lng is None:
+            errs.append(_err("coords", "required"))  # geofence nuqtasiz bo'lmaydi
+        elif code := geofence_error(r.geofence):
+            errs.append(_err("geofence", code))
     return cust, errs
 
 
 async def check(db: AsyncSession, actor: User, body: ContractDraftIn, own_id: int | None = None) -> dict:
-    existing_src = False
+    existing_src, fresh = False, True
     if own_id:
         own = await db.get(Contract, own_id)
         existing_src = bool(own and own.source in ("manual", "import"))
-    _, errs = await validate(db, actor, body, own_id, existing_src)
+        fresh = bool(own and not own.number and not existing_src)
+    _, errs = await validate(db, actor, body, own_id, existing_src, fresh=fresh)
     t = totals(body.type, body.price, body.annual_volume, body.annual_trips, body.valid_from, body.valid_to)
     return {"ok": not errs, "errors": errs, "totals": {"qty": float(t["qty"]), "unit": t["unit"], "net": float(t["net"]), "vat": float(t["vat"]),
                                                       "total": float(t["total"]), "words": money_words(t["total"]),
@@ -246,6 +263,19 @@ async def next_number(db: AsyncSession, prefix_code: str, year: int) -> str:
 
 
 # --- saqlash ---
+def _apply_location(cust: Customer, lat: float | None, lng: float | None, geofence: dict | None = None) -> None:
+    """Yurist kiritgan nuqta/geofence o'zgargan bo'lsa — «kutilmoqda» (manba legal, GPS tasdiqlaydi); o'zgarmagan bo'lsa maqom saqlanadi."""
+    if lat is None or lng is None:
+        return
+    same = cust.lat is not None and cust.lng is not None and abs(cust.lat - lat) < 1e-6 and abs(cust.lng - lng) < 1e-6
+    gf = json.dumps(geofence) if geofence else None
+    if not same or (gf and gf != cust.geofence):
+        cust.lat, cust.lng = lat, lng
+        if gf:
+            cust.geofence = gf
+        cust.location_status, cust.location_source = LocationStatus.pending, "legal"
+
+
 def _apply(cust: Customer, ct: Contract, body: ContractDraftIn) -> None:
     r = body.requisites
     cust.name = r.name.strip()
@@ -254,6 +284,7 @@ def _apply(cust: Customer, ct: Contract, body: ContractDraftIn) -> None:
     for f in ("director", "legal_address", "address", "bank", "mfo", "account", "oked", "cadastre"):
         setattr(cust, f, (getattr(r, f) or "").strip() or None)
     cust.is_rented = r.is_rented
+    _apply_location(cust, r.lat, r.lng, r.geofence)
     ct.draft_data = None
     ct.type, ct.price, ct.annual_volume, ct.annual_trips = body.type, body.price, body.annual_volume, body.annual_trips
     ct.valid_from, ct.valid_to, ct.place, ct.sign_method = body.valid_from, body.valid_to, (body.place or "").strip(), body.sign_method
@@ -269,7 +300,7 @@ def _event(ct: Contract, actor: User, action: str, comment: str | None = None) -
 
 
 async def create(db: AsyncSession, actor: User, body: ContractDraftIn) -> Contract:
-    cust, errs = await validate(db, actor, body)
+    cust, errs = await validate(db, actor, body, fresh=True)
     _raise(errs)
     prov = await _provider(db, cust.district_id)
     number = await next_number(db, prov.code if prov else "SH", body.valid_from.year)
@@ -278,6 +309,8 @@ async def create(db: AsyncSession, actor: User, body: ContractDraftIn) -> Contra
     _apply(cust, ct, body)
     _event(ct, actor, "created")
     db.add(ct)
+    await db.flush()
+    await _close_appeals(db, ct, actor)
     await db.commit()
     return await get(db, actor, ct.id)
 
@@ -357,33 +390,149 @@ async def update(db: AsyncSession, actor: User, contract_id: int, body: Contract
     if ct.status not in ("draft", "returned"):
         raise conflict("contract_locked", "Shartnoma imzolangan — faqat buxgalter qaytarsa o'zgartiriladi")
     body.customer_id = ct.customer_id
-    cust, errs = await validate(db, actor, body, own_id=ct.id, existing_src=ct.source in ("manual", "import"))
+    cust, errs = await validate(db, actor, body, own_id=ct.id, existing_src=ct.source in ("manual", "import"),
+                                fresh=not ct.number and ct.source not in ("manual", "import"))
     _raise(errs)
     _apply(cust, ct, body)
     if not ct.number:  # tugallanmagan loyiha — raqam tekshiruvdan o'tgach beriladi
         prov = await _provider(db, cust.district_id)
         ct.number = await next_number(db, prov.code if prov else "SH", body.valid_from.year)
+        await _close_appeals(db, ct, actor)
     _event(ct, actor, "edited")
     log(db, ct, cust, actor, "act_contract_saved", f"Shartnoma ma'lumotlari saqlandi: {ct.display_number} «{cust.name}»" + _price_note(ct))
     await db.commit()
     return await get(db, actor, ct.id)
 
 
-async def start(db: AsyncSession, actor: User, customer_id: int) -> Contract:
-    """Usta: korxona tanlangan zahoti tugallanmagan loyiha (raqamsiz) — «Tugallanmagan shartnomalar»da qoladi."""
+async def start(db: AsyncSession, actor: User, customer_id: int, appeal_id: int | None = None) -> Contract:
+    """Usta: korxona tanlangan zahoti tugallanmagan loyiha (raqamsiz) — «Tugallanmagan shartnomalar»da qoladi.
+    appeal_id — yangi korxona murojaatidan boshlangan shartnoma (raqam olganda murojaat yopiladi)."""
     cust = await db.get(Customer, customer_id)
     if not cust:
         raise not_found("customer")
     access.check_scope(actor, cust.district_id)
+    appeal = None
+    if appeal_id:
+        appeal = await db.get(Appeal, appeal_id, with_for_update=True)
+        if not appeal:
+            raise not_found("appeal")
+        access.check_scope(actor, appeal.district_id)
+        if appeal.status != AppealStatus.new:
+            raise conflict("appeal_not_new", "Bu murojaat allaqachon ko'rib chiqilgan")
     today = local_day(utcnow())
     ct = Contract(customer_id=cust.id, number=None, status="draft", is_active=False, created_by_id=actor.id, events=[],
                   type=ContractType.by_volume, valid_from=today, valid_to=date(today.year, 12, 31))
     _event(ct, actor, "created")
     db.add(ct)
     await db.flush()
+    if appeal:
+        appeal.contract_id, appeal.customer_id = ct.id, cust.id
     log(db, ct, cust, actor, "act_contract_started", f"Yangi shartnoma boshlandi: «{cust.name}»")
     await db.commit()
     return await get(db, actor, ct.id)
+
+
+async def _close_appeals(db: AsyncSession, ct: Contract, actor: User) -> None:
+    """Shartnoma raqam oldi — undan boshlangan yangi korxona murojaati yopiladi."""
+    rows = (await db.execute(select(Appeal).where(Appeal.contract_id == ct.id, Appeal.status == AppealStatus.new))).scalars()
+    for a in rows:
+        a.status, a.reviewed_by_id, a.reviewed_at, a.customer_id = AppealStatus.accepted, actor.id, utcnow(), ct.customer_id
+
+
+async def active_contract(db: AsyncSession, customer_id: int) -> Contract | None:
+    """Amaldagi shartnoma: faol holat va muddati tugamagan (eng kech tugaydigani)."""
+    q = (select(Contract).where(Contract.customer_id == customer_id, Contract.status.in_(LIVE), Contract.is_active.is_(True),
+                                Contract.valid_to >= local_day(utcnow()))
+         .order_by(Contract.valid_to.desc()).limit(1))
+    return (await db.execute(q)).scalar_one_or_none()
+
+
+async def lookup(db: AsyncSession, actor: User, stir: str) -> dict:
+    """Usta birinchi qadami: STIR bo'yicha korxona va uning amaldagi shartnomasi (bo'lsa — qo'shimcha shartnoma taklifi).
+    Keyinchalik: bazada yo'q bo'lsa — soliq bazasidan rekvizitlar (CLAUDE.md, kechiktirilgan STIR ishi)."""
+    from app.repositories import customers as cust_repo
+    cust = await cust_repo.by_stir(db, stir)
+    if not cust:
+        return {"customer": None, "active_contract": None, "last_contract": None}
+    access.check_scope(actor, cust.district_id)
+    act = await active_contract(db, cust.id)
+    last = await last_contract(db, cust.id)
+    brief = lambda c: {"id": c.id, "number": c.display_number, "valid_from": c.valid_from, "valid_to": c.valid_to}  # noqa: E731
+    return {"customer": {"id": cust.id, "name": cust.name, "district_id": cust.district_id, "code": cust.code},
+            "active_contract": brief(act) if act else None, "last_contract": brief(last) if last else None}
+
+
+async def last_contract(db: AsyncSession, customer_id: int) -> Contract | None:
+    """Oxirgi imzolangan (faol holatdagi) shartnoma — muddati tugagan bo'lsa ham."""
+    q = (select(Contract).where(Contract.customer_id == customer_id, Contract.status.in_(LIVE))
+         .order_by(Contract.valid_to.desc(), Contract.id.desc()).limit(1))
+    return (await db.execute(q)).scalar_one_or_none()
+
+
+REQUEST_KINDS = {"amendment": "Qo'shimcha shartnoma", "branch": "Yangi filial", "address": "Manzilni o'zgartirish"}
+
+
+class RequestIn(BaseModel):
+    stir: str = Field(pattern=r"^\d{9}$")
+    kind: str = Field(pattern="^(amendment|branch|address)$")
+    note: str | None = Field(None, max_length=500)
+
+
+async def create_request(db: AsyncSession, actor: User, body: RequestIn) -> ContractRequest:
+    """Yangi shartnoma o'rniga — mavjud kontragent bo'yicha so'rov: qo'shimcha shartnoma (buxgalterga) yoki filial/manzil (GPS'ga)."""
+    from app.repositories import customers as cust_repo
+    cust = await cust_repo.by_stir(db, body.stir)
+    if not cust:
+        raise not_found("customer")
+    access.check_scope(actor, cust.district_id)
+    last = await last_contract(db, cust.id)
+    if not last:
+        raise invalid("no_contract", "Bu korxonada imzolangan shartnoma yo'q")
+    r = ContractRequest(kind=body.kind, customer_id=cust.id, contract_id=last.id, district_id=cust.district_id,
+                        note=(body.note or "").strip() or None, created_by_id=actor.id)
+    db.add(r)
+    await db.flush()
+    from app.services import situation
+    situation.activity(db, "act_contract_request", f"So'rov: {REQUEST_KINDS[body.kind]} — {last.display_number} «{cust.name}»",
+                       params={"kind": body.kind, "contract": last.display_number, "customer": cust.name},
+                       district_id=cust.district_id, actor_id=actor.id, ref=("customer", cust.id))
+    await db.commit()
+    return r
+
+
+async def list_requests(db: AsyncSession, actor: User, kind: str | None, status: str | None) -> list[dict]:
+    q = select(ContractRequest, Customer, Contract).join(Customer, Customer.id == ContractRequest.customer_id) \
+        .outerjoin(Contract, Contract.id == ContractRequest.contract_id).order_by(ContractRequest.id.desc()).limit(300)
+    s = access.scope(actor)
+    if s is not None:
+        q = q.where(ContractRequest.district_id.in_(s or {-1}))
+    if kind:
+        q = q.where(ContractRequest.kind == kind)
+    if status:
+        q = q.where(ContractRequest.status == status)
+    return [{"id": r.id, "kind": r.kind, "status": r.status, "note": r.note, "created_at": r.created_at, "district_id": r.district_id,
+             "customer": {"id": c.id, "name": c.name, "stir": c.stir, "code": c.code, "phone": c.phone},
+             "contract": {"id": ct.id, "number": ct.display_number, "valid_to": ct.valid_to, "price": float(ct.price) if ct.price else None} if ct else None}
+            for r, c, ct in (await db.execute(q)).all()]
+
+
+class CounterpartyIn(BaseModel):
+    stir: str = Field(pattern=r"^\d{9}$")
+    name: str = Field(min_length=2, max_length=200)
+    district_id: int
+    phone: str | None = Field(None, max_length=30)
+
+
+async def counterparty(db: AsyncSession, actor: User, body: CounterpartyIn) -> Customer:
+    """Korxona = shartnoma kontragenti: STIR bazada bo'lsa — o'sha korxona, aks holda rekvizitlardan yangisi (joylashuv — GPS oynasida)."""
+    from app.repositories import customers as cust_repo
+    from app.schemas import CustomerIn
+    from app.services import customer_service
+    cust = await cust_repo.by_stir(db, body.stir)
+    if cust:
+        access.check_scope(actor, cust.district_id)
+        return cust
+    return await customer_service.create(db, CustomerIn(name=body.name, district_id=body.district_id, stir=body.stir, phone=body.phone), actor)
 
 
 async def save_draft(db: AsyncSession, actor: User, contract_id: int, body: ContractDraftIn) -> Contract:
@@ -430,35 +579,37 @@ async def delete_draft(db: AsyncSession, actor: User, contract_id: int, reason: 
     await situation.commit(db)
 
 
-async def sign(db: AsyncSession, storage: Storage, actor: User, contract_id: int, signed_on: date, method: str,
+async def sign(db: AsyncSession, storage: Storage, actor: User, contract_id: int, signed_on: date | None, method: str,
                platform: str | None, platform_id: str | None, file: tuple[bytes, str, str] | None) -> Contract:
+    """Legal: imzo usulini belgilab buxgalterga yuboradi («Tasdiq kutilmoqda»). Imzolanganini FAQAT buxgalter tasdiqlaydi:
+    elektron — Didox'da imzolangach platforma ID bilan; qog'oz — legal yuklagan skan (PDF) bo'yicha. Tasdiqqacha faol emas.
+    platform/platform_id legal'dan qabul qilinmaydi (eski mijozlar uchun parametrlar qoldi)."""
     ct = await _own(db, actor, contract_id, lock=True)
     if ct.status not in ("draft", "returned"):
-        raise conflict("contract_locked", "Shartnoma allaqachon imzolangan")
+        raise conflict("contract_locked", "Shartnoma allaqachon buxgalterga yuborilgan")
     if not ct.number or ct.draft_data:
         raise conflict("contract_incomplete", "Avval ma'lumotlarni tekshirib, saqlang")
     if method not in ("electronic", "paper"):
         raise invalid("bad_sign_method", "Imzo usuli: elektron yoki qog'oz")
-    if signed_on > local_day(utcnow()):
+    if signed_on and signed_on > local_day(utcnow()):
         raise invalid("bad_dates", "Imzolangan sana kelajakda bo'lmasin")
-    pid = (platform_id or "").strip() or None
-    if method == "electronic":
-        if platform not in PLATFORMS or not pid:
-            raise invalid("platform_required", "Elektron imzoda platforma va hujjat ID kiritiladi")
-        dup = (await db.execute(select(Contract.id).where(Contract.platform_id == pid, Contract.id != ct.id))).first()
-        if dup:
-            raise conflict("platform_id_taken", "Bu platforma ID boshqa shartnomada bor")
-    if method == "paper" and not file and not ct.scan_key:
-        # Qog'ozda: imzolangan nusxaning skani (PDF) yuklanmaguncha «Tugallanmagan»da qoladi
-        raise invalid("scan_required_paper", "Qog'ozda imzolangan shartnomaning skanini (PDF) yuklang")
+    if method == "paper":
+        if not signed_on:
+            raise invalid("signed_on_required", "Qog'ozda imzolangan sanani kiriting")
+        if not file and not ct.scan_key:
+            raise invalid("scan_required_paper", "Qog'ozda imzolangan shartnomaning skanini (PDF) yuklang")
     if file:
         await _put_scan(storage, ct, file)
     was_returned = ct.status == "returned"
-    ct.status, ct.is_active, ct.signed_on, ct.sign_method = "signed", True, signed_on, method
-    ct.platform, ct.platform_id = (platform if method == "electronic" else None), (pid if method == "electronic" else None)
+    manual = ct.source in ("manual", "import")
+    ct.status, ct.sign_method = "signed", method
+    ct.is_active = manual  # yangi shartnoma — faqat buxgalter tasdig'idan keyin faol (murojaat, GPS)
+    ct.signed_on = signed_on if method == "paper" else None  # elektron — sanani buxgalter kiritadi
+    if not manual:
+        ct.platform = ct.platform_id = None
     ct.signed_at, ct.return_comment = utcnow(), None
     _event(ct, actor, "resubmitted" if was_returned else "signed")
-    log(db, ct, ct.customer, actor, "act_contract_signed", f"Shartnoma imzolandi, buxgalteriyaga yuborildi: {ct.display_number} «{ct.customer.name}»"
+    log(db, ct, ct.customer, actor, "act_contract_signed", f"Shartnoma buxgalter tasdig'iga yuborildi: {ct.display_number} «{ct.customer.name}»"
         + (" (qayta)" if was_returned else ""))
     await db.commit()
     return await get(db, actor, ct.id)
@@ -485,10 +636,33 @@ async def attach_scan(db: AsyncSession, storage: Storage, actor: User, contract_
     return await get(db, actor, ct.id)
 
 
-async def approve(db: AsyncSession, actor: User, contract_id: int) -> Contract:
+class ApproveIn(BaseModel):
+    """Buxgalter tasdig'i: elektron shartnomada — platforma, hujjat ID va kontragent imzolagan sana."""
+    platform: str | None = Field(None, pattern="^(didox|hujjat|soliq|other)$")
+    platform_id: str | None = Field(None, max_length=40)
+    signed_on: date | None = None
+
+
+async def approve(db: AsyncSession, actor: User, contract_id: int, body: ApproveIn | None = None) -> Contract:
+    """Imzolanganini faqat buxgalter tasdiqlaydi → «Tasdiqlandi», faol (murojaat, GPS) va hisob-kitobga kiradi."""
+    body = body or ApproveIn()
     ct = await _own(db, actor, contract_id, lock=True)
     if ct.status != "signed":
         raise conflict("contract_not_signed", "Faqat imzolangan (tasdiq kutayotgan) shartnoma tasdiqlanadi")
+    if body.signed_on and body.signed_on > local_day(utcnow()):
+        raise invalid("bad_dates", "Imzolangan sana kelajakda bo'lmasin")
+    pid = (body.platform_id or "").strip() or None
+    if ct.sign_method == "electronic" and ct.source not in ("manual", "import"):
+        if not body.platform or not pid:
+            raise invalid("platform_required", "Elektron shartnomada platforma va hujjat ID kiritiladi")
+    if pid:
+        dup = (await db.execute(select(Contract.id).where(Contract.platform_id == pid, Contract.id != ct.id))).first()
+        if dup:
+            raise conflict("platform_id_taken", "Bu platforma ID boshqa shartnomada bor")
+        ct.platform, ct.platform_id = body.platform or ct.platform or "other", pid
+    if body.signed_on or not ct.signed_on:
+        ct.signed_on = body.signed_on or local_day(utcnow())
+    ct.is_active = True
     ct.status, ct.approved_at, ct.approved_by_id = "approved", utcnow(), actor.id
     _event(ct, actor, "approved")
     log(db, ct, ct.customer, actor, "act_contract_approved", f"Buxgalter tasdiqladi: {ct.display_number} «{ct.customer.name}»")
@@ -560,7 +734,9 @@ def out(ct: Contract, used: float | None = None, with_events: bool = False) -> d
          "created_at": ct.created_at, "total": float(t["total"]), "vat": float(t["vat"]), "is_active": ct.is_active,
          "customer": {"id": c.id, "name": c.name, "code": c.code, "stir": c.stir, "district_id": c.district_id, "director": c.director,
                       "phone": c.phone, "legal_address": c.legal_address, "address": c.address, "bank": c.bank, "mfo": c.mfo,
-                      "account": c.account, "oked": c.oked, "cadastre": c.cadastre, "is_rented": c.is_rented} if c else None,
+                      "account": c.account, "oked": c.oked, "cadastre": c.cadastre, "is_rented": c.is_rented,
+                      "lat": c.lat, "lng": c.lng, "location_status": c.location_status.value,
+                      "geofence": json.loads(c.geofence) if c.geofence else None} if c else None,
          "draft": json.loads(ct.draft_data) if ct.draft_data else None, "source": ct.source, "awaiting_scan": awaiting_scan(ct),
          "tariff_price": float(ct.tariff_price) if ct.tariff_price is not None else None, "price_reason": ct.price_reason,
          "submitted_by": next((e.actor.full_name for e in reversed(ct.events) if e.action in ("signed", "resubmitted", "imported") and e.actor),

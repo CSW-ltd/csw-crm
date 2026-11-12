@@ -10,8 +10,9 @@ from app.models import Customer, CustomerContact, Request
 from app.services import sms
 
 
-async def test_new_company_gets_code_and_sms(world, client_factory, sessionmaker):
-    op, legal, gps = await client_factory("operator"), await client_factory("legal"), await client_factory("gps")
+async def test_new_company_appeal_creates_no_customer(world, client_factory, sessionmaker):
+    """Yangi korxona qo'ng'irog'i: korxona yaratilmaydi (korxona = shartnoma kontragenti) — murojaat legal'da shartnomani kutadi."""
+    op = await client_factory("operator")
     a = world["districts"]["a"]
     sms.SENT.clear()
     body = {"phone": "94 512 11 16", "stir": "309876543", "contact_name": "Karimov Anvar"}
@@ -20,31 +21,12 @@ async def test_new_company_gets_code_and_sms(world, client_factory, sessionmaker
     r = await op.post("/api/v1/appeals/new-company", json={**body, "district_id": a})
     assert r.status_code == 201, r.text
     ap = r.json()
-    assert ap["number"].startswith("MR-") and ap["caller_name"] == "Karimov Anvar" and ap["customer_id"]
-    await asyncio.sleep(0.05)  # SMS fon vazifasi
+    assert ap["number"].startswith("MR-") and ap["caller_name"] == "Karimov Anvar" and ap["status"] == "new"
+    assert ap["customer_id"] is None and ap["contract_id"] is None and ap["stir"] == "309876543"
+    await asyncio.sleep(0.05)
+    assert not sms.SENT  # maxsus raqam korxona shartnomadan yaratilganda beriladi
     async with sessionmaker() as s:
-        cust = await s.get(Customer, ap["customer_id"])
-        contact = (await s.execute(select(CustomerContact).where(CustomerContact.customer_id == cust.id))).scalar_one()
-    assert cust.stir == "309876543" and contact.name == "Karimov Anvar" and cust.phone == "+998 94 512-11-16"
-    assert sms.SENT and sms.SENT[-1][0] == "+998 94 512-11-16" and cust.code in sms.SENT[-1][1] and "hech kimga" in sms.SENT[-1][1]
-    assert cust.code not in r.text  # operatorga maxsus raqam qaytarilmaydi
-    # Shu STIR bilan yana — xato va mavjud korxona
-    r = await op.post("/api/v1/appeals/new-company", json={**body, "district_id": a})
-    err = r.json()["error"]
-    assert r.status_code == 409 and err["code"] == "stir_taken" and err["details"]["customer_id"] == cust.id
-    # Legal qabul qiladi: o'sha karta to'ldiriladi (yangisi ochilmaydi), shartnoma bilan
-    accept = {"customer": {"name": "Navbahor Savdo MChJ", "district_id": a, "stir": "309876543", "address": "Navoiy 7"},
-              "contract": {"number": "SH-2026/0901", "type": "per_trip", "valid_from": str(date.today()),
-                           "valid_to": str(date.today() + timedelta(days=200))}}
-    r = await legal.post(f"/api/v1/appeals/{ap['id']}/accept", json=accept)
-    assert r.status_code == 200, r.text
-    assert r.json()["customer_id"] == cust.id
-    async with sessionmaker() as s:
-        c2 = await s.get(Customer, cust.id)
-        assert c2.name == "Navbahor Savdo MChJ" and c2.code == cust.code
-        assert (await s.execute(select(Customer).where(Customer.stir == "309876543"))).scalars().all() == [c2]
-    # Shartnoma bor — GPS ko'radi
-    assert any(x["customer"]["id"] == cust.id for x in (await gps.get("/api/v1/gps/requests")).json())
+        assert (await s.execute(select(Customer).where(Customer.stir == "309876543"))).scalars().all() == []
 
 
 async def test_gps_hides_requests_without_contract(world, client_factory, sessionmaker):
