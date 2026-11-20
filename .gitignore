@@ -31,3 +31,9 @@ deploy/**/bootstrap.yaml
 key.txt
 deploy/**/admin-allow.conf
 .history/
+
+# shaxsiy fayllar
+Backup-codes*
+*.backup-codes*
+csw-gps-agent*
+docs/
