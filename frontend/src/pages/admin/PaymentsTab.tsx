@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Autocomplete, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, InputAdornment, Paper, Stack, Table, TableBody,
+import { Alert, Autocomplete, Box, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, InputAdornment, Paper, Stack, Table, TableBody,
   TableCell, TableContainer, TableHead, TablePagination, TableRow, TextField, Typography } from "@mui/material";
 import AddIcon from "@mui/icons-material/Add";
 import UploadIcon from "@mui/icons-material/UploadFile";
@@ -8,7 +8,7 @@ import { errorCode, errorMessage } from "@/api/client";
 import { useCan } from "@/hooks/useCan";
 import { useI18n } from "@/i18n/I18nContext";
 import { toast } from "@/lib/alerts";
-import type { CustomerListItem, PaymentItem } from "@/types";
+import type { CustomerListItem, PaymentImportResult, PaymentItem } from "@/types";
 import type { RefData } from "./AdminHome";
 import { fmtMoney } from "./CompaniesTab";
 
@@ -87,39 +87,47 @@ function AddDialog({ onClose, onDone }: { onClose: () => void; onDone: () => voi
   const [input, setInput] = useState("");
   const [f, setF] = useState({ paid_on: todayIso(), amount: "", doc_no: "", note: "" });
   const [busy, setBusy] = useState(false);
+  const [dup, setDup] = useState(false);  // takror ogohlantirishi: «Baribir saqlash» bilan yoziladi
   useEffect(() => {
     if (input.trim().length < 2) { setOpts([]); return; }
     const h = window.setTimeout(() => customersApi.search({ q: input.trim(), limit: 10 }).then((r) => setOpts(r.items)).catch(() => undefined), 300);
     return () => window.clearTimeout(h);
   }, [input]);
   const amount = Number(f.amount.replace(/\s/g, "").replace(",", "."));
-  const save = async () => {
+  const save = async (force = false) => {
     if (!cust) return;
     setBusy(true);
-    try { await accountingApi.addPayment({ customer_id: cust.id, paid_on: f.paid_on, amount, doc_no: f.doc_no || null, note: f.note || null });
+    try { await accountingApi.addPayment({ customer_id: cust.id, paid_on: f.paid_on, amount, doc_no: f.doc_no || null, note: f.note || null, force });
       toast(t("saved")); onDone(); }
-    catch (e) { toast(tErr(errorCode(e), errorMessage(e)), "error"); } finally { setBusy(false); }
+    catch (e) {
+      if (errorCode(e) === "payment_duplicate") setDup(true);
+      else toast(tErr(errorCode(e), errorMessage(e)), "error");
+    } finally { setBusy(false); }
   };
+  const edit = (patch: Partial<typeof f>) => { setF({ ...f, ...patch }); setDup(false); };
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>{t("pay_add")}</DialogTitle>
       <DialogContent dividers>
         <Stack spacing={2}>
-          <Autocomplete id="pay-customer" options={opts} value={cust} onChange={(_, v) => setCust(v)} inputValue={input} onInputChange={(_, v) => setInput(v)}
+          <Autocomplete id="pay-customer" options={opts} value={cust} onChange={(_, v) => { setCust(v); setDup(false); }} inputValue={input} onInputChange={(_, v) => setInput(v)}
             filterOptions={(x) => x} getOptionLabel={(o) => `${o.code ?? ""} · ${o.name}`} isOptionEqualToValue={(a, b) => a.id === b.id}
             renderInput={(p) => <TextField {...p} label={t("pay_customer")} placeholder="KTR47" />} noOptionsText="—" />
           <Stack direction="row" spacing={1.5}>
-            <TextField id="pay-date" type="date" label={t("date")} value={f.paid_on} onChange={(e) => setF({ ...f, paid_on: e.target.value })} InputLabelProps={{ shrink: true }} />
-            <TextField id="pay-amount" label={t("pay_amount")} value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value.replace(/[^\d\s.,]/g, "") })}
+            <TextField id="pay-date" type="date" label={t("date")} value={f.paid_on} onChange={(e) => edit({ paid_on: e.target.value })} InputLabelProps={{ shrink: true }} />
+            <TextField id="pay-amount" label={t("pay_amount")} value={f.amount} onChange={(e) => edit({ amount: e.target.value.replace(/[^\d\s.,]/g, "") })}
               InputProps={{ endAdornment: <InputAdornment position="end">so'm</InputAdornment> }} sx={{ flex: 1 }} />
           </Stack>
-          <TextField id="pay-doc" label={t("pay_doc")} value={f.doc_no} onChange={(e) => setF({ ...f, doc_no: e.target.value })} />
+          <TextField id="pay-doc" label={t("pay_doc")} value={f.doc_no} onChange={(e) => edit({ doc_no: e.target.value })} />
           <TextField label={t("rq_note")} value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
+          {dup && <Alert severity="warning" id="pay-dup">{t("pay_dup_warn")}</Alert>}
         </Stack>
       </DialogContent>
       <DialogActions>
         <Button onClick={onClose}>{t("cancel")}</Button>
-        <Button id="pay-save" variant="contained" disableElevation disabled={!cust || !(amount > 0) || !f.paid_on || busy} onClick={save}>{t("save")}</Button>
+        {dup
+          ? <Button id="pay-save-force" variant="contained" color="warning" disableElevation disabled={busy} onClick={() => save(true)}>{t("pay_dup_force")}</Button>
+          : <Button id="pay-save" variant="contained" disableElevation disabled={!cust || !(amount > 0) || !f.paid_on || busy} onClick={() => save()}>{t("save")}</Button>}
       </DialogActions>
     </Dialog>
   );
@@ -149,27 +157,42 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
   const { t, tErr } = useI18n();
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
-  const [res, setRes] = useState<Awaited<ReturnType<typeof accountingApi.importPayments>> | null>(null);
+  const [res, setRes] = useState<PaymentImportResult | null>(null);
+  const [include, setInclude] = useState<number[]>([]);  // buxgalter belgilagan ehtimoliy takrorlar
   const [busy, setBusy] = useState(false);
   const run = async (dry: boolean) => {
     if (!file) return;
     setBusy(true);
-    try { const r = await accountingApi.importPayments(file, dry); if (dry) setRes(r); else { toast(t("pay_imported", { n: r.ok })); onDone(); } }
+    try {
+      const r = await accountingApi.importPayments(file, dry, dry ? [] : include);
+      if (dry) { setRes(r); setInclude([]); } else { toast(t("pay_imported", { n: r.ok })); onDone(); }
+    }
     catch (e) { toast(tErr(errorCode(e), errorMessage(e)), "error"); } finally { setBusy(false); }
   };
+  const toWrite = (res?.ok ?? 0) + include.length;
+  const toggle = (line: number) => setInclude((xs) => xs.includes(line) ? xs.filter((x) => x !== line) : [...xs, line]);
   return (
     <Dialog open onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle>{t("pay_import")}</DialogTitle>
       <DialogContent dividers>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{t("pay_import_hint")}</Typography>
-        <input ref={input} id="pay-file" type="file" hidden accept=".xlsx,.xls,.csv" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setRes(null); }} />
+        <input ref={input} id="pay-file" type="file" hidden accept=".xlsx,.xls,.csv" onChange={(e) => { setFile(e.target.files?.[0] ?? null); setRes(null); setInclude([]); }} />
         <Button variant="outlined" startIcon={<UploadIcon />} onClick={() => input.current?.click()}>{file ? file.name : t("pay_pick_file")}</Button>
         {res && <Box sx={{ mt: 2 }} id="pay-preview">
           <Alert severity={res.errors.length ? "warning" : "success"}>{t("pay_preview", { ok: res.ok, sum: fmtMoney(res.total), err: res.errors.length })}</Alert>
           {res.errors.length > 0 && <Box component="ul" sx={{ m: 0, mt: 1, pl: 3 }}>
             {res.errors.slice(0, 20).map((e) => <li key={e.line}>{t("pay_line", { n: e.line })}: {t(`pay_err_${e.error}` as "pay_err_bad_amount")} ({e.value})</li>)}
           </Box>}
-          <Table size="small" sx={{ mt: 1 }}><TableBody>{res.rows.slice(0, 50).map((r) => (
+          {res.duplicates > 0 && <Alert severity="info" sx={{ mt: 1 }} id="pay-dups">{t("pay_dups_skipped", { n: res.duplicates })}</Alert>}
+          {res.possible.length > 0 && <Box sx={{ mt: 1 }} id="pay-possible">
+            <Alert severity="warning">{t("pay_possible_hint", { n: res.possible.length })}</Alert>
+            <Table size="small"><TableBody>{res.possible.map((r) => (
+              <TableRow key={r.line} data-possible={r.line}>
+                <TableCell padding="checkbox"><Checkbox size="small" checked={include.includes(r.line)} onChange={() => toggle(r.line)} /></TableCell>
+                <TableCell>{t("pay_line", { n: r.line })}</TableCell><TableCell>{r.paid_on}</TableCell><TableCell>{r.code}</TableCell>
+                <TableCell>{r.name}</TableCell><TableCell align="right">{fmtMoney(r.amount)}</TableCell></TableRow>))}</TableBody></Table>
+          </Box>}
+          <Table size="small" sx={{ mt: 1 }}><TableBody>{res.rows.filter((r) => !r.dup).slice(0, 50).map((r) => (
             <TableRow key={r.line}><TableCell>{r.paid_on}</TableCell><TableCell>{r.code}</TableCell><TableCell>{r.name}</TableCell>
               <TableCell align="right">{fmtMoney(r.amount)}</TableCell><TableCell>{r.doc_no}</TableCell></TableRow>))}</TableBody></Table>
         </Box>}
@@ -177,7 +200,7 @@ function ImportDialog({ onClose, onDone }: { onClose: () => void; onDone: () => 
       <DialogActions>
         <Button onClick={onClose}>{t("cancel")}</Button>
         {!res ? <Button id="pay-check" variant="outlined" disabled={!file || busy} onClick={() => run(true)}>{t("pay_check")}</Button>
-          : <Button id="pay-commit" variant="contained" disableElevation disabled={!res.ok || busy} onClick={() => run(false)}>{t("pay_commit", { n: res.ok })}</Button>}
+          : <Button id="pay-commit" variant="contained" disableElevation disabled={!toWrite || busy} onClick={() => run(false)}>{t("pay_commit", { n: toWrite })}</Button>}
       </DialogActions>
     </Dialog>
   );

@@ -7,7 +7,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.errors import conflict, invalid, not_found
+from app.core.errors import AppError, conflict, invalid, not_found
 from app.db.base import utcnow
 from app.models import Customer, Payment, User
 from app.services import access, situation
@@ -28,11 +28,56 @@ async def _customer(db: AsyncSession, actor: User, customer_id: int) -> Customer
     return c
 
 
+def _doc_key(doc: str | None) -> str:
+    return re.sub(r"\s+", "", str(doc or "")).upper()
+
+
+def _amount_key(v) -> Decimal:
+    return Decimal(str(v)).quantize(Decimal("0.01"))
+
+
+class DupIndex:
+    """Takror to'lovni aniqlash (bekor qilinganlar hisobga olinmaydi).
+    Hujjat raqami bor: korxona + sana + summa + hujjat № mos kelsa — aniq takror ("duplicate", yozilmaydi).
+    Hujjat raqami yo'q: korxona + sana + summa mos kelsa — ehtimoliy takror ("possible", buxgalter belgilasa yoziladi)."""
+
+    def __init__(self, existing: list[Payment]):
+        self.full: dict[tuple, int | None] = {}
+        self.short: dict[tuple, int | None] = {}
+        for p in existing:
+            self.add(p.customer_id, p.paid_on, p.amount, p.doc_no, p.id)
+
+    def add(self, cid: int, day: date, amount, doc: str | None, pid: int | None = None) -> None:
+        short = (cid, day, _amount_key(amount))
+        self.short.setdefault(short, pid)
+        if _doc_key(doc):
+            self.full.setdefault((*short, _doc_key(doc)), pid)
+
+    def check(self, cid: int, day: date, amount, doc: str | None) -> tuple[str | None, int | None]:
+        short = (cid, day, _amount_key(amount))
+        if _doc_key(doc):
+            key = (*short, _doc_key(doc))
+            return ("duplicate", self.full[key]) if key in self.full else (None, None)
+        return ("possible", self.short[short]) if short in self.short else (None, None)
+
+
+async def _dup_index(db: AsyncSession, customer_ids: set[int], days: set[date]) -> DupIndex:
+    if not customer_ids or not days:
+        return DupIndex([])
+    q = select(Payment).where(Payment.customer_id.in_(customer_ids), Payment.paid_on.in_(days), Payment.cancelled_at.is_(None))
+    return DupIndex(list((await db.execute(q)).scalars()))
+
+
 async def create(db: AsyncSession, actor: User, customer_id: int, paid_on: date, amount: Decimal, doc_no: str | None,
-                 note: str | None) -> Payment:
+                 note: str | None, force: bool = False) -> Payment:
     await _customer(db, actor, customer_id)
     if amount <= 0:
         raise invalid("bad_amount", "Summa musbat bo'lsin")
+    if not force:
+        kind, pid = (await _dup_index(db, {customer_id}, {paid_on})).check(customer_id, paid_on, amount, doc_no)
+        if kind:
+            raise AppError(409, "payment_duplicate", "Shu korxonaga shu sanada shu summada to'lov allaqachon kiritilgan",
+                           {"payment_id": pid, "kind": kind})
     p = Payment(customer_id=customer_id, paid_on=paid_on, amount=amount, doc_no=(doc_no or "").strip() or None,
                 note=(note or "").strip() or None, source="manual", created_by_id=actor.id)
     db.add(p)
@@ -115,7 +160,9 @@ def _date(v) -> date | None:
     return None
 
 
-async def import_file(db: AsyncSession, actor: User, file_name: str, content: bytes, dry_run: bool) -> dict:
+async def import_file(db: AsyncSession, actor: User, file_name: str, content: bytes, dry_run: bool,
+                      include_lines: list[int] | None = None) -> dict:
+    """Aniq takrorlar yozilmaydi; ehtimoliy takrorlar (hujjat №siz) faqat `include_lines`da belgilangan qatorlar bo'lsa yoziladi."""
     from app.services.table_readers import read_tables
     _, tables = read_tables(file_name, content)
     s = access.scope(actor)
@@ -155,11 +202,21 @@ async def import_file(db: AsyncSession, actor: User, file_name: str, content: by
             break
     if not rows and not errors:
         raise invalid("bad_statement", "Ustunlar topilmadi: maxsus raqam yoki STIR, sana, summa")
-    if not dry_run:
-        for r in rows:
+    # Takrorlar: bazadagi (bekor qilinmagan) to'lovlar va shu faylning o'zidagi oldingi qatorlar bilan solishtiriladi
+    idx = await _dup_index(db, {r["customer_id"] for r in rows}, {r["paid_on"] for r in rows})
+    for r in rows:
+        r["dup"], r["dup_of"] = idx.check(r["customer_id"], r["paid_on"], r["amount"], r["doc_no"])
+        idx.add(r["customer_id"], r["paid_on"], r["amount"], r["doc_no"])
+    include = set(include_lines or ())
+    write = [r for r in rows if r["dup"] is None or (r["dup"] == "possible" and r["line"] in include)]
+    if not dry_run and write:
+        for r in write:
             db.add(Payment(customer_id=r["customer_id"], paid_on=r["paid_on"], amount=Decimal(str(r["amount"])), doc_no=r["doc_no"],
                            source="import", note=f"import: {file_name}"[:255], created_by_id=actor.id))
-        situation.activity(db, "act_payment_import", f"Bank ko'chirmasidan to'lovlar: {len(rows)} ta, {sum(r['amount'] for r in rows)} so'm ({file_name})",
-                           params={"count": len(rows), "total": sum(r["amount"] for r in rows), "file": file_name}, actor_id=actor.id)
+        situation.activity(db, "act_payment_import", f"Bank ko'chirmasidan to'lovlar: {len(write)} ta, {sum(r['amount'] for r in write)} so'm ({file_name})",
+                           params={"count": len(write), "total": sum(r["amount"] for r in write), "file": file_name,
+                                   "skipped": len(rows) - len(write)}, actor_id=actor.id)
         await db.commit()
-    return {"dry_run": dry_run, "ok": len(rows), "errors": errors, "rows": rows[:200], "total": sum(r["amount"] for r in rows)}
+    return {"dry_run": dry_run, "ok": len(write), "errors": errors, "rows": rows[:200], "total": sum(r["amount"] for r in write),
+            "duplicates": sum(1 for r in rows if r["dup"] == "duplicate"),
+            "possible": [r for r in rows if r["dup"] == "possible"][:200]}

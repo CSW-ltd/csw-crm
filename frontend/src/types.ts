@@ -344,8 +344,15 @@ export interface MonthForm { request_id: number; number: string; day: string; cu
   price_source?: "tariff" | "contract" | null }
 export interface MonthFormCustomer { customer_id: number; name: string; code: string | null; district_id: number; forms: number; total: number;
   pending?: number; usage?: { contract: string; annual: number; used: number; pct: number; level: "ok" | "warn" | "over" } | null }
-export interface InvoiceItem { id: number; number: string; customer_id: number; customer_name: string | null; code: string | null; district_id: number | null;
-  period: string; status: "draft" | "sent"; total: number; vat: number; sent_at: string | null; sms_phone: string | null; lines_count: number; forms_count: number }
+/** Schyot-faktura: raqam (SF-BTE-2026-00001) faqat yuborishda beriladi — qoralamada null */
+export interface InvoiceItem { id: number; number: string | null; customer_id: number; customer_name: string | null; code: string | null; district_id: number | null;
+  period: string; status: "draft" | "sent"; total: number; vat: number; sent_at: string | null; sms_phone: string | null;
+  sent_via: "sms" | "manual" | null; has_phone: boolean; lines_count: number; forms_count: number }
+/** Bank ko'chirmasi qatori: dup — "duplicate" (aniq takror, yozilmaydi) / "possible" (hujjat №siz, belgilansa yoziladi) */
+export interface PaymentImportRow { line: number; name: string; code: string; paid_on: string; amount: number; doc_no: string | null;
+  dup: "duplicate" | "possible" | null; dup_of: number | null }
+export interface PaymentImportResult { dry_run: boolean; ok: number; total: number; errors: { line: number; error: string; value: string }[];
+  rows: PaymentImportRow[]; duplicates: number; possible: PaymentImportRow[] }
 export interface ProviderReq { id: number; name: string; code: string; region_id: number; full_name: string | null; inn: string | null; address: string | null;
   bank: string | null; mfo: string | null; account: string | null; director: string | null; chief_accountant: string | null;
   phone?: string | null; oked?: string | null }

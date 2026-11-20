@@ -46,6 +46,7 @@ class PaymentIn(BaseModel):
     amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     doc_no: str | None = Field(None, max_length=50)
     note: str | None = Field(None, max_length=255)
+    force: bool = False  # takror ogohlantirishidan keyin «Baribir saqlash»
 
 
 class CancelIn(BaseModel):
@@ -62,7 +63,8 @@ async def list_payments(q: str | None = Query(None, max_length=100), date_from: 
 
 @router.post("/payments", status_code=201)
 async def create_payment(body: PaymentIn, user: User = Pay, db: AsyncSession = DB) -> dict:
-    return payments.out(await payments.create(db, user, body.customer_id, body.paid_on, body.amount, body.doc_no, body.note))
+    return payments.out(await payments.create(db, user, body.customer_id, body.paid_on, body.amount, body.doc_no, body.note,
+                                              force=body.force))
 
 
 @router.post("/payments/{payment_id}/cancel")
@@ -71,9 +73,12 @@ async def cancel_payment(payment_id: int, body: CancelIn, user: User = Pay, db: 
 
 
 @router.post("/payments/import")
-async def import_payments(dry_run: bool = True, file: UploadFile = File(...), user: User = Pay, db: AsyncSession = DB) -> dict:
-    """Bank ko'chirmasi (xlsx/xls/csv): maxsus raqam yoki STIR, sana, summa, hujjat raqami. Avval dry_run=true."""
-    return await payments.import_file(db, user, file.filename or "statement.xlsx", await file.read(), dry_run)
+async def import_payments(dry_run: bool = True, include: str = Query("", max_length=4000), file: UploadFile = File(...),
+                          user: User = Pay, db: AsyncSession = DB) -> dict:
+    """Bank ko'chirmasi (xlsx/xls/csv): maxsus raqam yoki STIR, sana, summa, hujjat raqami. Avval dry_run=true.
+    Aniq takrorlar yozilmaydi; `include` — yozilishi kerak bo'lgan ehtimoliy takror qatorlari (vergul bilan: "5,9")."""
+    lines = [int(x) for x in include.split(",") if x.strip().isdigit()]
+    return await payments.import_file(db, user, file.filename or "statement.xlsx", await file.read(), dry_run, lines)
 
 
 # --- buyurtma varaqalari va oylik schyot-fakturalar ---
@@ -103,6 +108,12 @@ async def send_invoices(month: date, user: User = Pay, db: AsyncSession = DB) ->
     return await invoices.send_all(db, user, month)
 
 
+@router.post("/invoices/{invoice_id}/mark-sent")
+async def mark_invoice_sent(invoice_id: int, user: User = Pay, db: AsyncSession = DB) -> dict:
+    """Telefoni yo'q korxona: PDF qo'lda topshirildi — raqam beriladi, faktura qulflanadi (SMS ketmaydi)."""
+    return invoices.out(await invoices.mark_sent(db, user, invoice_id))
+
+
 @router.get("/invoices/{invoice_id}")
 async def get_invoice(invoice_id: int, user: User = View, db: AsyncSession = DB) -> dict:
     return invoices.out(await invoices.by_id(db, user, invoice_id), with_lines=True)
@@ -112,7 +123,7 @@ async def get_invoice(invoice_id: int, user: User = View, db: AsyncSession = DB)
 async def invoice_pdf(invoice_id: int, user: User = View, db: AsyncSession = DB) -> Response:
     inv = await invoices.by_id(db, user, invoice_id)
     return Response(await invoices.pdf(db, inv), media_type="application/pdf",
-                    headers={"Content-Disposition": f'inline; filename="{inv.number}.pdf"'})
+                    headers={"Content-Disposition": f'inline; filename="{inv.number or f"qoralama-{inv.id}"}.pdf"'})
 
 
 @public_router.get("/invoices/{token}")

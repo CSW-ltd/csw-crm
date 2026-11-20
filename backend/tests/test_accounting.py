@@ -158,3 +158,65 @@ async def test_new_contracts_by_period_and_district(world, client_factory, sessi
     # Korxonalar jadvali ham tuman bo'yicha
     rows = (await admin.get("/api/v1/accounting/companies", params={"district_id": b})).json()["items"]
     assert rows and {x["district_id"] for x in rows} == {b}
+
+
+def _statement(rows):
+    wb = Workbook()
+    ws = wb.active
+    ws.append(["Sana", "Maxsus raqam", "STIR", "Summa", "Hujjat №"])
+    for r in rows:
+        ws.append(r)
+    buf = io.BytesIO(); wb.save(buf)
+    return {"file": ("kochirma.xlsx", buf.getvalue(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+
+
+async def test_payment_import_twice_does_not_double(world, client_factory, sessionmaker):
+    """Ko'chirmani qayta yuklash: hujjat № mos keladigan qatorlar yozilmaydi; fayl ichidagi takror ham."""
+    await _setup(world, sessionmaker)
+    acc = await client_factory("buxgalter")
+    code, day = world["customer"].code, (T - timedelta(days=2)).strftime("%d.%m.%Y")
+    files = _statement([[day, code, "", 100000, "PP-1"], [day, code, "", 50000, "PP-2"], [day, code, "", 50000, "pp - 2"]])
+    r = (await acc.post("/api/v1/accounting/payments/import", params={"dry_run": "true"}, files=files)).json()
+    assert r["ok"] == 2 and r["duplicates"] == 1 and r["total"] == 150000  # 3-qator — fayl ichidagi takror (PP-2)
+    await acc.post("/api/v1/accounting/payments/import", params={"dry_run": "false"}, files=files)
+    r = (await acc.post("/api/v1/accounting/payments/import", params={"dry_run": "false"}, files=files)).json()
+    assert r["ok"] == 0 and r["duplicates"] == 3
+    lst = (await acc.get("/api/v1/accounting/payments")).json()
+    assert lst["total"] == 2 and lst["sum"] == 150000
+
+
+async def test_payment_import_possible_duplicate_needs_mark(world, client_factory, sessionmaker):
+    """Hujjat №siz qator bazadagi to'lov bilan (korxona, sana, summa) mos kelsa — ehtimoliy takror: belgilanmasa yozilmaydi."""
+    await _setup(world, sessionmaker)
+    acc = await client_factory("buxgalter")
+    paid = T - timedelta(days=1)
+    await acc.post("/api/v1/accounting/payments", json={"customer_id": world["customer"].id, "paid_on": str(paid), "amount": 70000})
+    files = _statement([[paid.strftime("%d.%m.%Y"), world["customer"].code, "", 70000, ""],
+                        [paid.strftime("%d.%m.%Y"), world["customer"].code, "", 80000, ""]])
+    r = (await acc.post("/api/v1/accounting/payments/import", params={"dry_run": "true"}, files=files)).json()
+    assert r["ok"] == 1 and [p["line"] for p in r["possible"]] == [2]
+    r = (await acc.post("/api/v1/accounting/payments/import", params={"dry_run": "false"}, files=files)).json()
+    assert r["ok"] == 1
+    assert (await acc.get("/api/v1/accounting/payments")).json()["total"] == 2
+    # Buxgalter belgilagan ehtimoliy takror (2-qator) yoziladi; belgilanmagani (3-qator, endi bazada bor) — yo'q
+    r = (await acc.post("/api/v1/accounting/payments/import", params={"dry_run": "false", "include": "2"}, files=files)).json()
+    assert r["ok"] == 1 and r["total"] == 70000
+    assert (await acc.get("/api/v1/accounting/payments")).json()["total"] == 3
+
+
+async def test_manual_payment_duplicate_warns_then_force(world, client_factory, sessionmaker):
+    await _setup(world, sessionmaker)
+    acc = await client_factory("buxgalter")
+    body = {"customer_id": world["customer"].id, "paid_on": str(T), "amount": 90000, "doc_no": "PP-9"}
+    first = (await acc.post("/api/v1/accounting/payments", json=body)).json()
+    r = await acc.post("/api/v1/accounting/payments", json={**body, "doc_no": " pp-9 "})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "payment_duplicate"
+    assert r.json()["error"]["details"]["payment_id"] == first["id"]
+    assert (await acc.post("/api/v1/accounting/payments", json={**body, "doc_no": "PP-10"})).status_code == 201  # boshqa hujjat
+    assert (await acc.post("/api/v1/accounting/payments", json={**body, "doc_no": "PP-9", "force": True})).status_code == 201
+    # Bekor qilingan to'lov takror emas
+    await acc.post(f"/api/v1/accounting/payments/{first['id']}/cancel", json={"reason": "Xato kiritildi"})
+    body2 = {"customer_id": world["customer"].id, "paid_on": str(T - timedelta(days=3)), "amount": 1000}
+    p2 = (await acc.post("/api/v1/accounting/payments", json=body2)).json()
+    await acc.post(f"/api/v1/accounting/payments/{p2['id']}/cancel", json={"reason": "Xato kiritildi"})
+    assert (await acc.post("/api/v1/accounting/payments", json=body2)).status_code == 201

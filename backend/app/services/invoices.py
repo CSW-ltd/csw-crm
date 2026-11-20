@@ -1,5 +1,8 @@
 """Oylik schyot-faktura: har korxonaga oyiga bitta (draft → sent). Narx QQS bilan, fakturada "shu jumladan QQS 12%".
-Jo'natish: SMS (summa + PDF havola, maxfiy token). Didox / Soliq e-faktura integratsiyasi keyin (ERI kaliti kerak) — `send_efaktura`."""
+Jo'natish: SMS (summa + PDF havola, maxfiy token). Telefoni yo'q korxona fakturasi qoralamada qoladi — buxgalter PDF'ni
+o'zi topshiradi va «Qo'lda yuborildi» deb belgilaydi. Raqam faqat yuborishda beriladi: SF-<provider>-<yil>-<NNNNN>
+(har xizmat ko'rsatuvchi uchun alohida, har yili 1 dan) — shuning uchun raqamlarda uzilish bo'lmaydi.
+Didox / Soliq e-faktura integratsiyasi keyin (ERI kaliti kerak) — `send_efaktura`."""
 import secrets
 from datetime import date
 from decimal import Decimal
@@ -12,9 +15,9 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings, public_url
 from app.core.errors import conflict, not_found
 from app.db.base import utcnow
-from app.models import Customer, District, Invoice, InvoiceLine, Provider, User
+from app.models import Customer, District, Invoice, InvoiceCounter, InvoiceLine, Provider, User
 from app.services import access, billing, situation, sms
-from app.services.billing import ZERO, money, month_bounds
+from app.services.billing import ZERO, local_day, money, month_bounds
 
 
 def vat_of(total: Decimal) -> Decimal:
@@ -26,7 +29,7 @@ def out(i: Invoice, with_lines: bool = False) -> dict:
     d = {"id": i.id, "number": i.number, "customer_id": i.customer_id, "customer_name": i.customer.name if i.customer else None,
          "code": i.customer.code if i.customer else None, "district_id": i.customer.district_id if i.customer else None,
          "period": i.period, "status": i.status, "total": float(i.total), "vat": float(i.vat), "sent_at": i.sent_at,
-         "sms_phone": i.sms_phone, "lines_count": sum(1 for x in i.lines if x.kind != "annex"),
+         "sms_phone": i.sms_phone, "sent_via": i.sent_via, "has_phone": bool(i.customer and i.customer.phone), "lines_count": sum(1 for x in i.lines if x.kind != "annex"),
          "forms_count": sum(1 for x in i.lines if x.kind in ("form", "annex"))}
     if with_lines:
         d["lines"] = [{"kind": x.kind, "day": x.day, "description": x.description, "qty": float(x.qty), "unit": x.unit,
@@ -41,7 +44,7 @@ async def _provider_for(db: AsyncSession, district_id: int) -> Provider | None:
 
 async def list_month(db: AsyncSession, actor: User, month: date, district_id: int | None = None) -> list[Invoice]:
     start, _ = month_bounds(month)
-    q = select(Invoice).where(Invoice.period == start).options(selectinload(Invoice.customer)).order_by(Invoice.number)
+    q = select(Invoice).where(Invoice.period == start).options(selectinload(Invoice.customer)).order_by(Invoice.id)
     s = access.scope(actor)
     cond = []
     if s is not None:
@@ -60,8 +63,6 @@ async def generate(db: AsyncSession, actor: User, month: date) -> dict:
     led = await billing.load(db, custs)
     existing = {i.customer_id: i for i in (await db.execute(select(Invoice).where(Invoice.period == start))).scalars()}
     created = updated = skipped_sent = 0
-    seq = (await db.execute(select(Invoice.number).where(Invoice.period == start))).scalars().all()
-    next_no = max([int(n.rsplit("-", 1)[1]) for n in seq] or [0]) + 1
     for c in custs:
         lines = billing.month_lines(led, c.id, start)
         total = sum((x["amount"] for x in lines), ZERO)
@@ -74,9 +75,8 @@ async def generate(db: AsyncSession, actor: User, month: date) -> dict:
                 await db.delete(inv)
             continue
         if inv is None:
-            inv = Invoice(number=f"SF-{start.year}-{start.month:02d}-{next_no:05d}", customer_id=c.id, period=start,
-                          token=secrets.token_urlsafe(32), created_by_id=actor.id, total=0, vat=0, lines=[])
-            next_no += 1
+            inv = Invoice(number=None, customer_id=c.id, period=start, token=secrets.token_urlsafe(32), created_by_id=actor.id,
+                          total=0, vat=0, lines=[])
             db.add(inv)
             created += 1
         else:
@@ -105,24 +105,59 @@ def link(inv: Invoice) -> str:
     return f"{public_url()}/api/v1/public/invoices/{inv.token}"
 
 
+async def _assign_number(db: AsyncSession, inv: Invoice) -> None:
+    """SF-BTE-2026-00001: hisoblagich qatori FOR UPDATE bilan qulflanadi — bir vaqtda yuborilgan ikki faktura bir xil raqam olmaydi.
+    Chaqiruvchi commit qiladi."""
+    prov = await db.get(Provider, inv.provider_id) if inv.provider_id else None
+    if not prov:
+        raise conflict("provider_missing", "Bu viloyat uchun xizmat ko'rsatuvchi kompaniya sozlanmagan")
+    year = local_day(utcnow()).year
+    q = select(InvoiceCounter).where(InvoiceCounter.provider_id == prov.id, InvoiceCounter.year == year).with_for_update()
+    counter = (await db.execute(q)).scalar_one_or_none()
+    if not counter:
+        counter = InvoiceCounter(provider_id=prov.id, year=year, last_value=0)
+        db.add(counter)
+    counter.last_value += 1
+    inv.number = f"SF-{prov.code}-{year}-{counter.last_value:05d}"
+
+
 async def send_all(db: AsyncSession, actor: User, month: date) -> dict:
-    """Hamma yuborilmagan fakturalar: SMS (summa + PDF havola), status "sent" — keyin o'zgarmaydi."""
+    """Telefoni bor yuborilmagan fakturalar: raqam beriladi, SMS (summa + PDF havola), status "sent" — keyin o'zgarmaydi.
+    Telefoni yo'q yoki xizmat ko'rsatuvchisi sozlanmaganlari qoralamada qoladi (no_phone / no_provider)."""
     invs = [i for i in await list_month(db, actor, month) if i.status == "draft"]
-    sent = no_phone = 0
+    sent = no_phone = no_provider = 0
     for inv in invs:
         phone = inv.customer.phone
-        inv.status, inv.sent_at, inv.sent_by_id, inv.sms_phone = "sent", utcnow(), actor.id, phone
-        if phone:
-            total = f"{int(inv.total):,}".replace(",", " ")
-            sms.send_later(phone, f"Schyot-faktura {inv.number} ({inv.period.strftime('%m.%Y')}): {total} so'm, shu jumladan QQS. "
-                                  f"Yuklab olish: {link(inv)}")
-            sent += 1
-        else:
+        if not phone:
             no_phone += 1
-    situation.activity(db, "act_invoices_sent", f"Schyot-fakturalar jo'natildi: {len(invs)} ta ({start_of(month)})",
-                       params={"count": len(invs), "sms": sent, "month": start_of(month)}, actor_id=actor.id)
+            continue
+        if not inv.provider_id:
+            no_provider += 1
+            continue
+        await _assign_number(db, inv)
+        inv.status, inv.sent_at, inv.sent_by_id, inv.sms_phone, inv.sent_via = "sent", utcnow(), actor.id, phone, "sms"
+        total = f"{int(inv.total):,}".replace(",", " ")
+        sms.send_later(phone, f"Schyot-faktura {inv.number} ({inv.period.strftime('%m.%Y')}): {total} so'm, shu jumladan QQS. "
+                              f"Yuklab olish: {link(inv)}")
+        sent += 1
+    if sent:
+        situation.activity(db, "act_invoices_sent", f"Schyot-fakturalar jo'natildi: {sent} ta ({start_of(month)})",
+                           params={"count": sent, "sms": sent, "no_phone": no_phone, "month": start_of(month)}, actor_id=actor.id)
     await db.commit()
-    return {"sent": sent, "no_phone": no_phone, "total": len(invs)}
+    return {"sent": sent, "no_phone": no_phone, "no_provider": no_provider, "total": len(invs)}
+
+
+async def mark_sent(db: AsyncSession, actor: User, invoice_id: int) -> Invoice:
+    """Telefoni yo'q korxona: buxgalter PDF'ni o'zi topshirdi — raqam beriladi, status "sent" (sent_via="manual"), SMS ketmaydi."""
+    inv = await by_id(db, actor, invoice_id)
+    await ensure_draft(inv)
+    await _assign_number(db, inv)
+    inv.status, inv.sent_at, inv.sent_by_id, inv.sms_phone, inv.sent_via = "sent", utcnow(), actor.id, None, "manual"
+    situation.activity(db, "act_invoice_manual_sent", f"Schyot-faktura qo'lda topshirildi: {inv.number} «{inv.customer.name}»",
+                       params={"number": inv.number, "customer": inv.customer.name, "month": start_of(inv.period)},
+                       district_id=inv.customer.district_id, actor_id=actor.id, ref=("customer", inv.customer_id))
+    await db.commit()
+    return await by_id(db, actor, invoice_id)
 
 
 async def by_id(db: AsyncSession, actor: User | None, invoice_id: int | None = None, token: str | None = None) -> Invoice:

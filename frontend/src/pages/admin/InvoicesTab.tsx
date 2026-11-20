@@ -143,11 +143,17 @@ export function InvoicesTab({ districts }: RefData) {
   const [month, setMonth] = usePersisted("inv.month", monthIso(-1));
   const [data, setData] = useState<{ items: InvoiceItem[]; total: number; drafts: number; sent: number } | null>(null);
   const [ask, setAsk] = useState<"generate" | "send" | null>(null);
+  const [markOf, setMarkOf] = useState<InvoiceItem | null>(null);
+  const [filter, setFilter] = useState<"all" | "no_phone">("all");
   const [busy, setBusy] = useState(false);
   const fail = useCallback((e: unknown) => toast(tErr(errorCode(e), errorMessage(e)), "error"), [tErr]);
   const load = useCallback(() => accountingApi.invoices(asDate(month)).then(setData).catch(fail), [month, fail]);
   useEffect(() => { load(); }, [load]);
   const canRun = can("accounting.payments");
+  // Telefoni yo'q qoralamalar SMS bilan ketmaydi — buxgalter PDF'ni o'zi topshirib «Qo'lda yuborildi» deb belgilaydi
+  const noPhone = useMemo(() => (data?.items ?? []).filter((i) => i.status === "draft" && !i.has_phone), [data]);
+  const sendable = (data?.items ?? []).filter((i) => i.status === "draft" && i.has_phone).length;
+  const rows = filter === "no_phone" && noPhone.length ? noPhone : data?.items ?? [];
 
   const run = async () => {
     setBusy(true);
@@ -159,8 +165,20 @@ export function InvoicesTab({ districts }: RefData) {
       } else {
         const r = await accountingApi.sendInvoices(asDate(month));
         toast(t("inv_sent_done", { n: r.sent, p: r.no_phone }), r.no_phone ? "warning" : "success");
+        if (r.no_provider) toast(t("inv_no_provider_warn", { n: r.no_provider }), "warning");
       }
       setAsk(null);
+      await load();
+    } catch (e) { fail(e); } finally { setBusy(false); }
+  };
+
+  const markSent = async () => {
+    if (!markOf) return;
+    setBusy(true);
+    try {
+      const r = await accountingApi.markInvoiceSent(markOf.id);
+      toast(t("inv_marked_sent", { n: r.number ?? "" }), "success");
+      setMarkOf(null);
       await load();
     } catch (e) { fail(e); } finally { setBusy(false); }
   };
@@ -176,15 +194,21 @@ export function InvoicesTab({ districts }: RefData) {
           {canRun && <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
             <Button id="inv-generate" size="large" variant="outlined" startIcon={<EventAvailableIcon />} onClick={() => setAsk("generate")}
               sx={{ borderWidth: 2, "&:hover": { borderWidth: 2 } }}>{t("inv_generate")}</Button>
-            <Button id="inv-send" size="large" variant="contained" disableElevation startIcon={<SendIcon />} disabled={!data?.drafts}
+            <Button id="inv-send" size="large" variant="contained" disableElevation startIcon={<SendIcon />} disabled={!sendable}
               onClick={() => setAsk("send")} sx={{ bgcolor: STAGE.green.bg, "&:hover": { bgcolor: STAGE.green.border } }}>
-              {t("inv_send_all")}{data?.drafts ? ` (${data.drafts})` : ""}</Button>
+              {t("inv_send_all")}{sendable ? ` (${sendable})` : ""}</Button>
           </Stack>}
         </Stack>
         <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>{t("inv_hint")}</Typography>
       </Paper>
 
       <Paper variant="outlined" sx={{ p: 2 }}>
+        {noPhone.length > 0 && <Stack direction="row" spacing={1} sx={{ mb: 1.5 }} id="inv-filter">
+          <Chip label={`${t("inv_filter_all")} · ${data?.items.length ?? 0}`} color={filter !== "no_phone" ? "primary" : "default"}
+            onClick={() => setFilter("all")} data-filter="all" />
+          <Chip label={`${t("inv_filter_no_phone")} · ${noPhone.length}`} color={filter === "no_phone" ? "warning" : "default"}
+            onClick={() => setFilter("no_phone")} data-filter="no_phone" />
+        </Stack>}
         <TableContainer><Table size="small" id="inv-table">
           <TableHead><TableRow>
             <TableCell>{t("inv_number")}</TableCell><TableCell>{t("cmp_name")}</TableCell><TableCell>{t("district")}</TableCell>
@@ -192,8 +216,9 @@ export function InvoicesTab({ districts }: RefData) {
             <TableCell align="right">{t("inv_vat")}</TableCell><TableCell>{t("inv_status")}</TableCell><TableCell />
           </TableRow></TableHead>
           <TableBody>
-            {data?.items.map((i) => <TableRow key={i.id} hover data-invoice={i.number} data-status={i.status}>
-              <TableCell sx={{ fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>{i.number}</TableCell>
+            {rows.map((i) => <TableRow key={i.id} hover data-invoice={i.number ?? `draft-${i.id}`} data-status={i.status}>
+              <TableCell sx={{ fontFamily: "ui-monospace, monospace", whiteSpace: "nowrap" }}>{i.number
+                ?? <Typography component="span" variant="body2" color="text.secondary">{t("inv_no_number")}</Typography>}</TableCell>
               <TableCell>{i.customer_name} <Typography component="span" variant="caption" sx={{ fontFamily: "ui-monospace, monospace" }}>{i.code}</Typography></TableCell>
               <TableCell>{districts.find((d) => d.id === i.district_id)?.name}</TableCell>
               <TableCell align="right">{i.forms_count}</TableCell>
@@ -202,10 +227,15 @@ export function InvoicesTab({ districts }: RefData) {
               <TableCell>{i.status === "sent"
                 ? <Chip size="small" icon={<LockIcon />} label={t("inv_st_sent")} sx={{ bgcolor: STAGE.green.bg, color: "#fff", "& .MuiChip-icon": { color: "#fff" } }} />
                 : <Chip size="small" label={t("inv_st_draft")} sx={{ bgcolor: STAGE.yellow.bg, color: STAGE.yellow.ink }} />}
-                {i.status === "sent" && !i.sms_phone && <Chip size="small" color="error" variant="outlined" label={t("inv_no_phone")} sx={{ ml: 0.5 }} />}</TableCell>
-              <TableCell align="right"><Button size="small" startIcon={<PictureAsPdfIcon />} data-pdf={i.id} onClick={() => openPdf(i.id, fail)}>PDF</Button></TableCell>
+                {i.status === "draft" && !i.has_phone && <Chip size="small" color="warning" variant="outlined" label={t("inv_sms_not_sent")} sx={{ ml: 0.5 }} />}
+                {i.status === "sent" && i.sent_via === "manual" && <Chip size="small" variant="outlined" label={t("inv_sent_manual")} sx={{ ml: 0.5 }} />}
+                {i.status === "sent" && !i.sms_phone && i.sent_via !== "manual" && <Chip size="small" color="error" variant="outlined" label={t("inv_no_phone")} sx={{ ml: 0.5 }} />}</TableCell>
+              <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
+                {canRun && i.status === "draft" && !i.has_phone && <Button size="small" data-mark-sent={i.id} onClick={() => setMarkOf(i)}>
+                  {t("inv_mark_sent")}</Button>}
+                <Button size="small" startIcon={<PictureAsPdfIcon />} data-pdf={i.id} onClick={() => openPdf(i.id, fail)}>PDF</Button></TableCell>
             </TableRow>)}
-            {data && !data.items.length && <TableRow><TableCell colSpan={8}>
+            {data && !rows.length && <TableRow><TableCell colSpan={8}>
               <Alert severity="info" variant="outlined">{t(canRun ? "inv_empty_run" : "inv_empty")}</Alert></TableCell></TableRow>}
           </TableBody>
         </Table></TableContainer>
@@ -217,6 +247,15 @@ export function InvoicesTab({ districts }: RefData) {
         <DialogActions>
           <Button onClick={() => setAsk(null)} disabled={busy}>{t("cancel")}</Button>
           <Button id="inv-confirm" variant="contained" disableElevation onClick={run} disabled={busy}>{t("inv_confirm")}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={!!markOf} onClose={() => !busy && setMarkOf(null)}>
+        <DialogTitle>{t("inv_mark_sent")}</DialogTitle>
+        <DialogContent><DialogContentText>{t("inv_mark_sent_confirm", { c: markOf?.customer_name ?? "", s: fmtMoney(markOf?.total ?? 0) })}</DialogContentText></DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMarkOf(null)} disabled={busy}>{t("cancel")}</Button>
+          <Button id="inv-mark-confirm" variant="contained" disableElevation onClick={markSent} disabled={busy}>{t("inv_confirm")}</Button>
         </DialogActions>
       </Dialog>
     </Stack>

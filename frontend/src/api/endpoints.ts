@@ -1,7 +1,7 @@
 import { api } from "./client";
 import { clearTokens, saveTokens, type Tokens } from "@/lib/session";
 import { closeSocket } from "@/lib/socket";
-import type { ContractCheck, ContractDraft, ContractItem, StirLookup, Geofence, LocationQueueItem, NotificationItem, ExistingImportResult, TariffOverview, InvoiceItem, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
+import type { ContractCheck, ContractDraft, ContractItem, StirLookup, Geofence, LocationQueueItem, NotificationItem, ExistingImportResult, TariffOverview, InvoiceItem, PaymentImportResult, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
   ImportBatch, ImportResult, LocationStatus, Region, Role, SituationEvent, SituationLevel, User } from "@/types";
 
 export const locationsApi = {
@@ -207,15 +207,16 @@ export const accountingApi = {
     `/accounting/companies/${id}/green`).then((r) => r.data),
   payments: (params: { q?: string; date_from?: string; date_to?: string; customer_id?: number; limit?: number; offset?: number }) =>
     api.get<{ items: PaymentItem[]; total: number; sum: number }>("/accounting/payments", { params }).then((r) => r.data),
-  addPayment: (body: { customer_id: number; paid_on: string; amount: number; doc_no?: string | null; note?: string | null }) =>
+  /** force — takror ogohlantirishidan keyin «Baribir saqlash» */
+  addPayment: (body: { customer_id: number; paid_on: string; amount: number; doc_no?: string | null; note?: string | null; force?: boolean }) =>
     api.post<PaymentItem>("/accounting/payments", body).then((r) => r.data),
   cancelPayment: (id: number, reason: string) => api.post<PaymentItem>(`/accounting/payments/${id}/cancel`, { reason }).then((r) => r.data),
-  importPayments: (file: File, dry_run: boolean) => {
+  /** include — yozilishi kerak bo'lgan ehtimoliy takror qatorlari */
+  importPayments: (file: File, dry_run: boolean, include: number[] = []) => {
     const fd = new FormData();
     fd.append("file", file, file.name);
-    return api.post<{ dry_run: boolean; ok: number; total: number; errors: { line: number; error: string; value: string }[];
-      rows: { line: number; name: string; code: string; paid_on: string; amount: number; doc_no: string | null }[] }>(
-      "/accounting/payments/import", fd, { params: { dry_run }, timeout: 120_000 }).then((r) => r.data);
+    return api.post<PaymentImportResult>("/accounting/payments/import", fd,
+      { params: { dry_run, include: include.join(",") || undefined }, timeout: 120_000 }).then((r) => r.data);
   },
   orderForms: (month: string, district_id?: number, customer_id?: number) => api.get<{ month: string; items: MonthForm[];
     customers: MonthFormCustomer[]; total: number; count: number; pending: number }>("/accounting/order-forms", { params: { month, district_id, customer_id } })
@@ -224,8 +225,10 @@ export const accountingApi = {
     "/accounting/invoices", { params: { month, district_id } }).then((r) => r.data),
   generateInvoices: (month: string) => api.post<{ created: number; updated: number; skipped_sent: number; pending_forms: number }>("/accounting/invoices/generate", null,
     { params: { month }, timeout: 120_000 }).then((r) => r.data),
-  sendInvoices: (month: string) => api.post<{ sent: number; no_phone: number; total: number }>("/accounting/invoices/send", null,
+  sendInvoices: (month: string) => api.post<{ sent: number; no_phone: number; no_provider: number; total: number }>("/accounting/invoices/send", null,
     { params: { month }, timeout: 120_000 }).then((r) => r.data),
+  /** Telefoni yo'q korxona: PDF qo'lda topshirildi — raqam beriladi, faktura qulflanadi */
+  markInvoiceSent: (id: number) => api.post<InvoiceItem>(`/accounting/invoices/${id}/mark-sent`).then((r) => r.data),
   invoicePdf: (id: number) => api.get<Blob>(`/accounting/invoices/${id}/pdf`, { responseType: "blob", timeout: 60_000 }).then((r) => r.data),
 };
 

@@ -56,11 +56,12 @@ def render(inv, cust, prov) -> bytes:
     _fonts()
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm, topMargin=14 * mm, bottomMargin=14 * mm,
-                            title=f"Schyot-faktura {inv.number}")
+                            title=f"Schyot-faktura {inv.number or 'QORALAMA'}")
     st = ParagraphStyle("n", fontName="DejaVu", fontSize=9, leading=12)
     b = ParagraphStyle("b", parent=st, fontName="DejaVu-Bold")
     h = ParagraphStyle("h", parent=b, fontSize=14, leading=18, alignment=1)
-    story = [Paragraph(f"SCHYOT-FAKTURA № {inv.number}", h),
+    # Qoralamada raqam yo'q — raqam faqat yuborishda beriladi
+    story = [Paragraph(f"SCHYOT-FAKTURA № {inv.number}" if inv.number else "SCHYOT-FAKTURA — QORALAMA (raqam yuborishda beriladi)", h),
              Paragraph(f"Davr: {inv.period.strftime('%m.%Y')} · Sana: {(inv.sent_at or inv.created_at).strftime('%d.%m.%Y')}",
                        ParagraphStyle("c", parent=st, alignment=1)), Spacer(1, 6 * mm)]
     p = prov

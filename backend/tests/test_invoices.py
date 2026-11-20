@@ -34,7 +34,7 @@ async def test_order_forms_and_invoice_by_volume(world, client_factory, sessionm
     assert g["created"] == 1
     inv = (await acc.get("/api/v1/accounting/invoices", params=m)).json()["items"][0]
     total = sum(Decimal(str(x["amount"])) for x in mine)
-    assert inv["status"] == "draft" and inv["number"] == f"SF-{M.year}-{M.month:02d}-00001"
+    assert inv["status"] == "draft" and inv["number"] is None  # raqam faqat yuborishda beriladi
     assert Decimal(str(inv["total"])) == total and Decimal(str(inv["vat"])) == vat_of(total)
     full = (await acc.get(f"/api/v1/accounting/invoices/{inv['id']}")).json()
     assert all(x["unit"] == "m³" and x["price"] == 50_000 for x in full["lines"])
@@ -54,6 +54,8 @@ async def test_order_forms_and_invoice_by_volume(world, client_factory, sessionm
     sms.SENT.clear()
     r = (await acc.post("/api/v1/accounting/invoices/send", params=m)).json()
     assert r["sent"] == 1
+    inv = (await acc.get("/api/v1/accounting/invoices", params=m)).json()["items"][0]
+    assert inv["number"] == f"SF-BTE-{T.year}-00001" and inv["sent_via"] == "sms"
     await asyncio.sleep(0.05)
     assert sms.SENT and sms.SENT[-1][0] == "+998 90 111-22-33" and inv["number"] in sms.SENT[-1][1] and token in sms.SENT[-1][1]
     pub = await anon.get(f"/api/v1/public/invoices/{token}")
@@ -107,3 +109,56 @@ def test_words_uz():
     assert words_uz(1_250_000) == "bir million ikki yuz ellik ming"
     assert words_uz(16_071) == "o'n olti ming yetmish bir"
     assert words_uz(0) == "nol"
+
+
+async def test_no_phone_stays_draft_then_manual_sent(world, client_factory, sessionmaker):
+    """Telefoni yo'q: «Hammasiga jo'natish» qoralamada qoldiradi (raqamsiz); «Qo'lda yuborildi» raqam beradi va qulflaydi."""
+    await _setup(world, sessionmaker)  # korxona telefoni yo'q
+    acc, legal = await client_factory("buxgalter"), await client_factory("legal")
+    m = {"month": str(M)}
+    await acc.post("/api/v1/accounting/invoices/generate", params=m)
+    sms.SENT.clear()
+    r = (await acc.post("/api/v1/accounting/invoices/send", params=m)).json()
+    assert r["sent"] == 0 and r["no_phone"] == 1
+    inv = (await acc.get("/api/v1/accounting/invoices", params=m)).json()["items"][0]
+    assert inv["status"] == "draft" and inv["number"] is None and inv["has_phone"] is False and not sms.SENT
+    pdf = await acc.get(f"/api/v1/accounting/invoices/{inv['id']}/pdf")
+    assert pdf.status_code == 200 and "qoralama" in pdf.headers["content-disposition"]
+    assert (await legal.post(f"/api/v1/accounting/invoices/{inv['id']}/mark-sent")).status_code == 403
+    done = (await acc.post(f"/api/v1/accounting/invoices/{inv['id']}/mark-sent")).json()
+    assert done["status"] == "sent" and done["sent_via"] == "manual" and done["number"] == f"SF-BTE-{T.year}-00001"
+    again = await acc.post(f"/api/v1/accounting/invoices/{inv['id']}/mark-sent")
+    assert again.status_code == 409 and again.json()["error"]["code"] == "invoice_sent"
+    # Qayta «Oy yopish» yuborilganiga tegmaydi, raqam o'zgarmaydi
+    g = (await acc.post("/api/v1/accounting/invoices/generate", params=m)).json()
+    assert g["skipped_sent"] == 1
+    assert (await acc.get("/api/v1/accounting/invoices", params=m)).json()["items"][0]["number"] == done["number"]
+
+
+async def test_invoice_numbers_per_provider_and_year(world, sessionmaker):
+    """Har xizmat ko'rsatuvchi o'z ketma-ketligida; yangi yilda 1 dan boshlanadi."""
+    from app.models import Invoice, InvoiceCounter, Provider
+    from app.services.invoices import _assign_number
+    from sqlalchemy import select
+    async with sessionmaker() as s:
+        provs = {p.code: p for p in (await s.execute(select(Provider))).scalars()}
+        s.add(InvoiceCounter(provider_id=provs["BTE"].id, year=T.year - 1, last_value=50))  # o'tgan yil
+        invs = []
+        for k, code in enumerate(["BTE", "BTK", "BTE"]):
+            inv = Invoice(customer_id=world["customer"].id, provider_id=provs[code].id, period=date(2000, k + 1, 1), token=f"t{k}",
+                          total=0, vat=0)
+            s.add(inv)
+            invs.append(inv)
+        await s.flush()
+        for inv in invs:
+            await _assign_number(s, inv)
+        await s.commit()
+        assert [i.number for i in invs] == [f"SF-BTE-{T.year}-00001", f"SF-BTK-{T.year}-00001", f"SF-BTE-{T.year}-00002"]
+        no_prov = Invoice(customer_id=world["customer"].id, provider_id=None, period=date(2000, 9, 1), token="tx", total=0, vat=0)
+        s.add(no_prov)
+        await s.flush()
+        try:
+            await _assign_number(s, no_prov)
+            raise AssertionError("provider_missing kutilgan edi")
+        except Exception as e:  # noqa: BLE001
+            assert getattr(e, "code", None) == "provider_missing"

@@ -479,11 +479,12 @@ class OrderForm(TimestampMixin, Base):
 
 
 class Invoice(TimestampMixin, Base):
-    """Oylik schyot-faktura: har korxonaga oyiga bitta. draft → sent (yuborilgach o'zgarmaydi)."""
+    """Oylik schyot-faktura: har korxonaga oyiga bitta. draft → sent (yuborilgach o'zgarmaydi).
+    Raqam faqat yuborishda beriladi: SF-<provider>-<yil>-<NNNNN> (InvoiceCounter); qoralamada — NULL."""
     __tablename__ = "invoices"
     __table_args__ = (UniqueConstraint("customer_id", "period", name="uq_invoices_customer_period"),)
     id: Mapped[int] = mapped_column(primary_key=True)
-    number: Mapped[str] = mapped_column(String(30), unique=True)
+    number: Mapped[str | None] = mapped_column(String(30), unique=True)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), index=True)
     provider_id: Mapped[int | None] = mapped_column(ForeignKey("providers.id"))
     period: Mapped[date] = mapped_column(Date, index=True)  # oyning 1-kuni
@@ -494,6 +495,7 @@ class Invoice(TimestampMixin, Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime)
     sent_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     sms_phone: Mapped[str | None] = mapped_column(String(30))
+    sent_via: Mapped[str | None] = mapped_column(String(10))  # "sms" | "manual" (telefoni yo'q — buxgalter qo'lda topshirgan)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     customer: Mapped["Customer"] = relationship()
     lines: Mapped[list["InvoiceLine"]] = relationship(order_by="InvoiceLine.id", cascade="all, delete-orphan", lazy="selectin")
@@ -534,6 +536,14 @@ class Payment(TimestampMixin, Base):
 class NaryadCounter(Base):
     """Avtonaryad tartib raqami: har bir xizmat ko'rsatuvchi uchun har yili 1 dan."""
     __tablename__ = "naryad_counters"
+    provider_id: Mapped[int] = mapped_column(ForeignKey("providers.id"), primary_key=True)
+    year: Mapped[int] = mapped_column(Integer, primary_key=True)
+    last_value: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class InvoiceCounter(Base):
+    """Schyot-faktura tartib raqami: har bir xizmat ko'rsatuvchi uchun har yili 1 dan (yuborishda beriladi)."""
+    __tablename__ = "invoice_counters"
     provider_id: Mapped[int] = mapped_column(ForeignKey("providers.id"), primary_key=True)
     year: Mapped[int] = mapped_column(Integer, primary_key=True)
     last_value: Mapped[int] = mapped_column(Integer, default=0)
