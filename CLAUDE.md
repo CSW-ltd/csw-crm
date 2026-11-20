@@ -10,16 +10,19 @@ Bu fayl Claude Code uchun: har sessiya boshida o'qiladi. Repo **ochiq (public)**
 - Noaniq joylar **grill uslubida** so'raladi: qisqa variantli savollar, tavsiya etilgan variant birinchi va «(Tavsiya)» belgisi bilan.
 - Har ishdan keyin **«Nimani sinash kerak»** ro'yxati chatda beriladi (raqamlangan, tekshirib bo'ladigan qadamlar).
 
-## Filiallar (2026-11-06 dan) — faqat uchta, PR yo'q
+## Filiallar (2026-11-20 dan) — faqat uchta, PR yo'q
+
+Ish **faqat `dev`da** bajariladi. O'zgarishlar **`dev` → `master` → `prod`** tartibida o'tadi.
 
 | Filial | Vazifasi | Kim/qachon yangilaydi |
 |---|---|---|
-| `dev` | kundalik ish, `*.test.csw.uz` | Claude — reja tasdiqlangach, to'g'ridan push |
-| `prod` | production, rol portallari `*.csw.uz` | foydalanuvchi «prod'ga chiqar» deganda: `dev` → `prod` **faqat fast-forward** (aynan testda sinalgan commit va rasm) |
-| `master` | oxirgi barqaror versiya (tiklash nuqtasi) | foydalanuvchi «barqaror» deganda: `prod` → `master` fast-forward |
+| `dev` | barcha ish, `*.test.csw.uz` | Claude — reja tasdiqlangach, to'g'ridan push |
+| `master` | testda sinalgan versiya | foydalanuvchi «master'ga o'tkaz» deganda: `dev` → `master` **faqat fast-forward** |
+| `prod` | production, rol portallari `*.csw.uz` | foydalanuvchi «prod'ga chiqar» deganda: `master` → `prod` **faqat fast-forward** (aynan testda sinalgan commit va rasm) |
 
-- Boshqa filial ochilmaydi. `prod` va `master`ga force-push va o'chirish taqiqlangan (GitHub himoyasi).
-- Jiddiy muammo: `prod` `master` holatiga qaytariladi (yangi commit bilan, force-push'siz) → `deploy.sh` bilan qayta chiqariladi; baza kerak bo'lsa `restore.sh`.
+- Yangi feature/fix filiallar ochilmaydi, PR ochilmaydi. Rejalardagi «PR-A», «PR-B» — `dev`dagi bosqich nomlari.
+- `master` va `prod`ga to'g'ridan commit yozilmaydi — faqat fast-forward. Force-push va o'chirish taqiqlangan (GitHub himoyasi).
+- Jiddiy muammo: darhol `deploy/deploy.sh <oldingi_sha>` (rasmlar GHCR'da SHA bo'yicha, filiallarga tegilmaydi); baza kerak bo'lsa `restore.sh`. Keyin tuzatish yoki revert commit `dev`da qilinadi va `dev` → `master` → `prod` orqali o'tadi.
 - Commit xabarlarida haqiqiy ma'lumot bo'yicha faqat umumiy sonlar (agregat) yoziladi.
 
 ## Maxfiylik qoidalari (buzilmaydi)
@@ -89,6 +92,6 @@ Muhim: testlar SQLite'da ishlaydi — MySQL'ga xos xatolar ko'rinmaydi. Baza/dra
 
 1–4 bajarildi va `dev`da: prod'ga tayyorlik (deploy/, GHCR, `ACTIVE_ROLES`, `app.bootstrap`, health, age zaxira), Render demo olib tashlandi,
 billing (mavjud shartnoma eski narxda), demo loginlari (`DEMO_CREDENTIALS`, 7 ta `csw.*`, `seed --reset --yes`).
-5. **Portallar (subdomenlar)** — avval shu, keyin **prod'ga chiqish** (`dev` → `prod`) va tuman xodimlariga tarqatish (qaror 2026-11-09). Keyin — OCR, yuz tanish, STIR.
+5. **Portallar (subdomenlar)** — avval shu, keyin **prod'ga chiqish** (`dev` → `master` → `prod`) va tuman xodimlariga tarqatish (qaror 2026-11-09). Keyin — OCR, yuz tanish, STIR.
 
 - Keyinroq: bitta STIR ostida bosh korxona guruhlash; xaritadagi takror nuqtalar tekshiruvi; maktab/bog'chalar (hududiy boshqarma orqali); printer agenti; haydovchilar uchun Telegram bot; o'z GPS monitoringi; jismoniy abonentlar; 1C o'rniga o'z buxgalteriyasi; Didox/Soliq e-faktura; qo'shimcha kelishuvlar; edo.ijro.uz muqobili — ichki hujjat aylanishi.
