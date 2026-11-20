@@ -1,7 +1,7 @@
 import { api } from "./client";
 import { clearTokens, saveTokens, type Tokens } from "@/lib/session";
 import { closeSocket } from "@/lib/socket";
-import type { ContractCheck, ContractDraft, ContractItem, StirLookup, Geofence, LocationQueueItem, NotificationItem, ExistingImportResult, TariffOverview, InvoiceItem, PaymentImportResult, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
+import type { ContractCheck, ContractDraft, ContractItem, StirLookup, Geofence, LocationQueueItem, NotificationItem, ExistingImportResult, TariffOverview, InvoiceItem, PaymentImportResult, GpsImportReport, GpsImportSummary, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
   ImportBatch, ImportResult, LocationStatus, Region, Role, SituationEvent, SituationLevel, User } from "@/types";
 
 export const locationsApi = {
@@ -282,6 +282,23 @@ export const contractsApi = {
   approve: (id: number, body?: { platform?: string; platform_id?: string; signed_on?: string }) =>
     api.post<ContractItem>(`/contracts/${id}/approve`, body ?? {}).then((r) => r.data),
   returnBack: (id: number, comment: string) => api.post<ContractItem>(`/contracts/${id}/return`, { comment }).then((r) => r.data),
+};
+
+/** GPS dispatch (PR-A): gps_eksport zip importi — avval tekshirish, keyin import; mapping — bo'lim (tuman) → CRM tumani */
+export const dispatchApi = {
+  preview: (file: File, mapping: Record<string, number> = {}) => {
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    fd.append("mapping", JSON.stringify(mapping));
+    return api.post<GpsImportReport>("/dispatch/import/preview", fd, { timeout: 120_000 }).then((r) => r.data);
+  },
+  apply: (file: File, mapping: Record<string, number>) => {
+    const fd = new FormData();
+    fd.append("file", file, file.name);
+    fd.append("mapping", JSON.stringify(mapping));
+    return api.post<GpsImportReport>("/dispatch/import/apply", fd, { timeout: 300_000 }).then((r) => r.data);
+  },
+  summary: () => api.get<GpsImportSummary>("/dispatch/summary").then((r) => r.data),
 };
 
 export const tariffsApi = {

@@ -2,6 +2,7 @@
 from datetime import date, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, Enum as SAEnum, Float, ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint, false as sa_false, true as sa_true
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin, utcnow
@@ -445,6 +446,75 @@ class VehiclePosition(Base):
     lng: Mapped[float] = mapped_column(Float)
     at: Mapped[datetime] = mapped_column(DateTime)
     source: Mapped[str] = mapped_column(String(20), default="monitoring")
+
+
+# --- GPS dispatch (docs/plans/gps-dispatch.md): tashqi GPS tizimidan geozonalar, mahallalar, mashina bog'lanishi ---
+class GpsSource(TimestampMixin, Base):
+    """Tashqi GPS akkaunti (Wialon Local: smartgps / wialon). Token bazada emas — faqat server .env'idagi kalit nomi."""
+    __tablename__ = "gps_sources"
+    __table_args__ = (UniqueConstraint("server", "account", name="uq_gps_sources_server_account"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    system: Mapped[str] = mapped_column(String(20))  # "smartgps" | "wialon"
+    server: Mapped[str] = mapped_column(String(120))  # GPS server host'i (Wialon Local)
+    account: Mapped[str] = mapped_column(String(100))
+    token_env: Mapped[str | None] = mapped_column(String(64))  # GPS_TOKEN_<KALIT> (PR-B)
+    district_id: Mapped[int | None] = mapped_column(ForeignKey("districts.id"))
+
+
+class Mahalla(TimestampMixin, Base):
+    """Mahalla (МФЙ): tuman ichida name_key (mfy_key) bo'yicha yagona. Importda yo'qolsa — o'chirilmaydi, is_active=False."""
+    __tablename__ = "mahallas"
+    __table_args__ = (UniqueConstraint("district_id", "name_key", name="uq_mahallas_district_key"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    district_id: Mapped[int] = mapped_column(ForeignKey("districts.id"), index=True)
+    name: Mapped[str] = mapped_column(String(150))
+    name_key: Mapped[str] = mapped_column(String(150))
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("gps_sources.id"))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
+
+
+class Geozone(Base):
+    """Tashqi geozona nusxasi: chiziq (tayoqcha, width_m — kenglik), poligon (mahalla chegarasi) yoki doira.
+    coords — GeoJSON tartibida [lng, lat]; hash — o'zgarishni aniqlash uchun (qayta import/sinxronlash)."""
+    __tablename__ = "geozones"
+    __table_args__ = (UniqueConstraint("source_id", "ext_resource_id", "ext_id", name="uq_geozones_ext"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("gps_sources.id"), index=True)
+    ext_resource_id: Mapped[int] = mapped_column(Integer)
+    ext_id: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(10))  # line | polygon | circle
+    name: Mapped[str | None] = mapped_column(String(200))
+    width_m: Mapped[float | None] = mapped_column(Float)
+    radius_m: Mapped[float | None] = mapped_column(Float)
+    coords: Mapped[str] = mapped_column(Text().with_variant(MEDIUMTEXT(), "mysql"))
+    min_lat: Mapped[float] = mapped_column(Float)
+    max_lat: Mapped[float] = mapped_column(Float)
+    min_lng: Mapped[float] = mapped_column(Float)
+    max_lng: Mapped[float] = mapped_column(Float)
+    color: Mapped[str | None] = mapped_column(String(9))
+    hash: Mapped[str] = mapped_column(String(64))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class MahallaGeozone(Base):
+    """Mahalla ↔ geozona: role="stick" (tayoqcha) yoki "boundary" (chegara). Bitta tayoqcha bir nechta mahallada bo'lishi mumkin."""
+    __tablename__ = "mahalla_geozones"
+    mahalla_id: Mapped[int] = mapped_column(ForeignKey("mahallas.id", ondelete="CASCADE"), primary_key=True)
+    geozone_id: Mapped[int] = mapped_column(ForeignKey("geozones.id", ondelete="CASCADE"), primary_key=True, index=True)
+    role: Mapped[str] = mapped_column(String(10), primary_key=True)
+
+
+class VehicleLink(Base):
+    """CRM mashinasi ↔ tashqi GPS obyekti (unit). Davlat raqami bo'yicha bog'lanadi; mashina avtomatik yaratilmaydi."""
+    __tablename__ = "vehicle_links"
+    __table_args__ = (UniqueConstraint("source_id", "ext_unit_id", name="uq_vehicle_links_unit"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id", ondelete="CASCADE"), index=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("gps_sources.id"))
+    ext_unit_id: Mapped[int] = mapped_column(Integer)
+    ext_name: Mapped[str | None] = mapped_column(String(150))
+    has_gps: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
 
 
 class OrderForm(TimestampMixin, Base):

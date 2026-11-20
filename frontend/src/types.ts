@@ -351,6 +351,17 @@ export interface InvoiceItem { id: number; number: string | null; customer_id: n
 /** Bank ko'chirmasi qatori: dup — "duplicate" (aniq takror, yozilmaydi) / "possible" (hujjat №siz, belgilansa yoziladi) */
 export interface PaymentImportRow { line: number; name: string; code: string; paid_on: string; amount: number; doc_no: string | null;
   dup: "duplicate" | "possible" | null; dup_of: number | null }
+/** GPS eksport importi: bo'lim — eksportdagi tuman (mfy_xarita), CRM tumaniga qo'lda bog'lanadi */
+export interface GpsImportSection { tuman: string; district_id: number | null; district: string | null; suggested_district_id: number | null;
+  mahallas: number; sticks: number; boundaries: number; no_boundary: string[]; missing_zones: number; units: number;
+  vehicles_matched: number; vehicles_missing: string[]; units_unmatched: string[] }
+export interface GpsImportReport { server: string; account: string; source_id: number | null;
+  zones: { total: number; line: number; polygon: number; circle: number; new: number; changed: number; deactivated: number };
+  sections: GpsImportSection[]; applied?: boolean;
+  stats?: { mahallas_created: number; mahallas_updated: number; mahallas_deactivated: number; links_changed: number; vehicles_linked: number } }
+export interface GpsImportSummary {
+  districts: { district_id: number; district: string | null; mahallas: number; sticks: number; boundaries: number; vehicles_linked: number }[];
+  sources: { id: number; system: string; server: string; account: string; zones: number; updated_at: string | null }[] }
 export interface PaymentImportResult { dry_run: boolean; ok: number; total: number; errors: { line: number; error: string; value: string }[];
   rows: PaymentImportRow[]; duplicates: number; possible: PaymentImportRow[] }
 export interface ProviderReq { id: number; name: string; code: string; region_id: number; full_name: string | null; inn: string | null; address: string | null;

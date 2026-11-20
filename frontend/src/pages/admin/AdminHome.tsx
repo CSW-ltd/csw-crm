@@ -21,8 +21,9 @@ import { SituationTab } from "./SituationTab";
 import { InvoicesTab, OrderFormsTab } from "./InvoicesTab";
 import { UsersTab } from "./UsersTab";
 import { VehiclesTab } from "./VehiclesTab";
+import { GeozonesTab } from "./GeozonesTab";
 
-const TABS = ["stats", "situation", "appeals", "companies", "contracts", "orderforms", "invoices", "payments", "customers", "users", "districts", "vehicles", "settings"] as const;
+const TABS = ["stats", "situation", "appeals", "companies", "contracts", "orderforms", "invoices", "payments", "customers", "users", "districts", "vehicles", "geozones", "settings"] as const;
 type TabId = (typeof TABS)[number];
 
 export interface RefData { regions: Region[]; districts: District[]; reload: () => Promise<void>; canWrite: boolean }
@@ -30,7 +31,7 @@ export interface RefData { regions: Region[]; districts: District[]; reload: () 
 // Yorliq → uni ko'rsatadigan ruxsat ("admin" — faqat admin)
 const TAB_PERM: Record<TabId, string[] | "admin"> = {
   situation: "admin", stats: ["stats.view"], appeals: ["appeals.view", "orders.view", "requests.view"], customers: ["customers.view"], companies: ["accounting.view"], contracts: ["customers.contract", "accounting.payments"], orderforms: ["accounting.payments"], invoices: ["accounting.payments"], payments: ["accounting.payments"], users: ["staff.view"], districts: "admin",
-  vehicles: ["vehicles.view"], settings: ["settings.view", "settings.radius_edit"],
+  vehicles: ["vehicles.view"], geozones: ["dispatch.import"], settings: ["settings.view", "settings.radius_edit"],
 };
 
 /** Boshqaruv paneli: yorliqlar ruxsatlarga qarab (admin — hammasi). Server har amalni o'zi ham tekshiradi. */
@@ -94,6 +95,7 @@ export function AdminHome() {
       {tab === "users" && <UsersTab {...ref} />}
       {tab === "districts" && <DistrictsTab {...ref} />}
       {tab === "vehicles" && <VehiclesTab {...ref} />}
+      {tab === "geozones" && <GeozonesTab {...ref} />}
       {tab === "settings" && <SettingsTab {...ref} />}
     </Stack>
   );

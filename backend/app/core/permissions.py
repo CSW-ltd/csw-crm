@@ -17,6 +17,7 @@ MODULES: dict[str, list[str]] = {
     "stats": ["view"],
     "orders": ["view", "print", "close", "unlock"],  # buyurtma varaqasi: ko'rish, chop etish (GPS), yopish (legal), blok/qayta chop (manager)
     "accounting": ["view", "payments"],  # debitor/kreditor ko'rish; to'lovlarni kiritish (buxgalter)
+    "dispatch": ["import"],  # GPS eksport importi: geozonalar, mahallalar, mashina ↔ GPS (hozircha faqat admin; andozalarda yo'q)
 }
 ALL_CODES: frozenset[str] = frozenset(f"{m}.{a}" for m, actions in MODULES.items() for a in actions)
 
