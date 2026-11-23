@@ -59,6 +59,32 @@ services:
     networks: [internal]
     logging: *logging
 
+  gps-worker:
+    image: ${IMAGE_REPO:-ghcr.io/csw-ltd}/csw-crm-api:${IMAGE_TAG}
+    restart: unless-stopped
+    command: ["python", "-m", "app.gps_worker"]
+    env_file: .env
+    environment:
+      APP_ENV: ${APP_ENV:-production}
+      APP_VERSION: ${IMAGE_TAG}
+      DATABASE_URL: mysql+aiomysql://${MYSQL_USER}:${MYSQL_PASSWORD}@mysql:3306/${MYSQL_DATABASE}
+      TZ: Asia/Tashkent
+    depends_on: [api, gps-mock]
+    cpus: 1.0
+    mem_limit: 1g
+    networks: [internal]
+    logging: *logging
+
+  # Soxta SmartGPS (sun'iy ma'lumot) — test serverga haqiqiy GPS ma'lumoti tushmaydi
+  gps-mock:
+    image: ${IMAGE_REPO:-ghcr.io/csw-ltd}/csw-crm-api:${IMAGE_TAG}
+    restart: unless-stopped
+    command: ["python", "-m", "app.gps.mock_server"]
+    environment:
+      APP_ENV: demo
+    networks: [internal]
+    logging: *logging
+
   web:
     image: ${IMAGE_REPO:-ghcr.io/csw-ltd}/csw-crm-web:${IMAGE_TAG}
     restart: unless-stopped

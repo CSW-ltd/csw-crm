@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     # TOTP kalitlarini bazada shifrlash (Fernet). Prod'da majburiy; lokalda bo'sh bo'lsa JWT_SECRET'dan olinadi.
     totp_enc_key: str = ""
 
+    # GPS (PR-B): SmartGPS/Wialon tokenlarini bazada shifrlash (Fernet). Bo'sh — GPS ulanishi o'chiq (lokalda JWT_SECRET'dan).
+    gps_enc_key: str = ""
+    # gps-worker konteyneri (python -m app.gps_worker). API SmartGPS'ga hech qachon chiqmaydi — faqat worker.
+    gps_worker_enabled: bool = False
+    gps_sync_time: str = "05:30"  # kunlik sinxronlash (Toshkent vaqti)
+
     @property
     def cors_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

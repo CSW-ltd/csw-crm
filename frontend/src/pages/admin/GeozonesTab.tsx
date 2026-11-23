@@ -8,6 +8,7 @@ import { useI18n } from "@/i18n/I18nContext";
 import { toast } from "@/lib/alerts";
 import type { GpsImportReport, GpsImportSummary } from "@/types";
 import type { RefData } from "./AdminHome";
+import { GpsSourcesPanel } from "./GpsSourcesPanel";
 
 const MAX_MB = 10;
 
@@ -64,6 +65,7 @@ export function GeozonesTab({ districts }: RefData) {
 
   return (
     <Stack spacing={2} id="geozones">
+      <GpsSourcesPanel districts={districts} />
       <Paper variant="outlined" sx={{ p: 2 }}>
         <Typography variant="subtitle1" fontWeight={600} sx={{ mb: 1 }}>{t("gz_summary")}</Typography>
         <TableContainer><Table size="small" id="gz-summary">

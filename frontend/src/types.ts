@@ -364,6 +364,17 @@ export interface GpsImportReport { server: string; account: string; source_id: n
 export interface GpsImportSummary {
   districts: { district_id: number; district: string | null; mahallas: number; sticks: number; boundaries: number; vehicles_linked: number }[];
   sources: { id: number; system: string; server: string; account: string; zones: number; updated_at: string | null }[] }
+export type GpsTokenStatus = "none" | "pending" | "ok" | "invalid";
+export interface GpsSyncStats { resources: number; zones: number; zones_new: number; zones_changed: number; zones_deactivated: number;
+  groups: number; groups_new: number; groups_changed: number; groups_deactivated: number; units: number; vehicles_linked: number;
+  unit_group_found: boolean }
+export interface GpsSourceRow { id: number; system: "smartgps" | "wialon"; server: string; account: string; district_id: number | null;
+  district: string | null; unit_group: string | null; is_active: boolean; token_status: GpsTokenStatus; token_user: string | null;
+  token_set_at: string | null; sync_requested: boolean; last_sync_at: string | null; last_error: string | null; zones: number; groups: number;
+  vehicles_linked: number; last_stats: GpsSyncStats | null }
+export interface GpsSourcesOverview { worker: { seen_at: string | null; alive: boolean; enabled: boolean }; encryption_ready: boolean;
+  sources: GpsSourceRow[] }
+export interface GpsSyncLogRow { id: number; started_at: string; finished_at: string | null; ok: boolean; stats: GpsSyncStats | null; error: string | null }
 export interface PaymentImportResult { dry_run: boolean; ok: number; total: number; errors: { line: number; error: string; value: string }[];
   rows: PaymentImportRow[]; duplicates: number; possible: PaymentImportRow[] }
 export interface ProviderReq { id: number; name: string; code: string; region_id: number; full_name: string | null; inn: string | null; address: string | null;

@@ -463,15 +463,55 @@ class VehiclePosition(Base):
 
 # --- GPS dispatch (docs/plans/gps-dispatch.md): tashqi GPS tizimidan geozonalar, mahallalar, mashina bog'lanishi ---
 class GpsSource(TimestampMixin, Base):
-    """Tashqi GPS akkaunti (Wialon Local: smartgps / wialon). Token bazada emas — faqat server .env'idagi kalit nomi."""
+    """Tashqi GPS akkaunti (Wialon Local: smartgps / wialon). PR-B: token admin «Ulash» orqali olinadi (faqat o'qish, 0x300),
+    bazada GPS_ENC_KEY bilan shifrlangan. SmartGPS'ga faqat gps-worker chiqadi (API emas)."""
     __tablename__ = "gps_sources"
     __table_args__ = (UniqueConstraint("server", "account", name="uq_gps_sources_server_account"),)
     id: Mapped[int] = mapped_column(primary_key=True)
     system: Mapped[str] = mapped_column(String(20))  # "smartgps" | "wialon"
     server: Mapped[str] = mapped_column(String(120))  # GPS server host'i (Wialon Local)
-    account: Mapped[str] = mapped_column(String(100))
-    token_env: Mapped[str | None] = mapped_column(String(64))  # GPS_TOKEN_<KALIT> (PR-B)
+    account: Mapped[str] = mapped_column(String(100))  # SmartGPS login nomi — token egasi shu bo'lishi tekshiriladi
+    token_env: Mapped[str | None] = mapped_column(String(64))  # eskirgan (PR-A), ishlatilmaydi
     district_id: Mapped[int | None] = mapped_column(ForeignKey("districts.id"))
+    token_enc: Mapped[str | None] = mapped_column(Text)  # Fernet (GPS_ENC_KEY)
+    # none | pending (saqlandi, worker tekshiradi) | ok | invalid
+    token_status: Mapped[str] = mapped_column(String(10), default="none", server_default="none")
+    token_user: Mapped[str | None] = mapped_column(String(100))
+    token_set_at: Mapped[datetime | None] = mapped_column(DateTime)
+    unit_group: Mapped[str | None] = mapped_column(String(150))  # tuman mashinalari guruhi (SmartGPS obyekt guruhi)
+    settings: Mapped[str | None] = mapped_column(Text)  # JSON: hisobot shablonlari va h.k. (keyingi bosqichlar)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
+    sync_requested_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_sync_at: Mapped[datetime | None] = mapped_column(DateTime)
+    last_error: Mapped[str | None] = mapped_column(String(500))
+
+
+class GeozoneGroup(Base):
+    """SmartGPS/Wialon geozona guruhi (resurs ichida): nomi va tarkibi (tashqi geozona id'lari). МСП/konteyner guruhlarini
+    tekshirish uchun. Yo'qolsa — is_active=False."""
+    __tablename__ = "geozone_groups"
+    __table_args__ = (UniqueConstraint("source_id", "ext_resource_id", "ext_id", name="uq_geozone_groups_ext"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("gps_sources.id"), index=True)
+    ext_resource_id: Mapped[int] = mapped_column(Integer)
+    ext_id: Mapped[int] = mapped_column(Integer)
+    name: Mapped[str] = mapped_column(String(200))
+    zone_ids: Mapped[str] = mapped_column(Text)  # JSON [ext_id, ...] (shu resurs ichida)
+    hash: Mapped[str] = mapped_column(String(64))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default=sa_true())
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class GpsSyncLog(Base):
+    """gps-worker sinxronlash jurnali: har ishga tushish — natija sonlari yoki xato."""
+    __tablename__ = "gps_sync_log"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source_id: Mapped[int] = mapped_column(ForeignKey("gps_sources.id", ondelete="CASCADE"), index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime)
+    ok: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    stats: Mapped[str | None] = mapped_column(Text)  # JSON
+    error: Mapped[str | None] = mapped_column(String(500))
 
 
 class Mahalla(TimestampMixin, Base):

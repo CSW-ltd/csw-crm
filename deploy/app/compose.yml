@@ -20,6 +20,23 @@ services:
       driver: json-file
       options: { max-size: "20m", max-file: "5" }
 
+  # SmartGPS/Wialon bilan ishlaydigan YAGONA jarayon (faqat o'qish). api SmartGPS'ga chiqmaydi. Yiqilsa — sayt ishlashda davom etadi.
+  gps-worker:
+    image: ${IMAGE_REPO:-ghcr.io/csw-ltd}/csw-crm-api:${IMAGE_TAG}
+    restart: unless-stopped
+    command: ["python", "-m", "app.gps_worker"]
+    env_file: .env
+    environment:
+      APP_ENV: production
+      APP_VERSION: ${IMAGE_TAG}
+      DATABASE_URL: mysql+aiomysql://${MYSQL_USER}:${MYSQL_PASSWORD}@${DB_HOST}:3306/${MYSQL_DATABASE}
+      TZ: Asia/Tashkent
+    depends_on: [api]   # api migratsiyalarni qo'llaydi
+    cpus: 1.0
+    mem_limit: 1g
+    networks: [internal]
+    logging: *logging
+
   web:
     image: ${IMAGE_REPO:-ghcr.io/csw-ltd}/csw-crm-web:${IMAGE_TAG}
     restart: unless-stopped

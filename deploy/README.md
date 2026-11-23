@@ -107,6 +107,10 @@ Cheklovni qayta yoqish: `allow <IP>; ... deny all;` → `../dc exec edge nginx -
 
 **Admin 2FA (TOTP)** — prod'da har admin uchun majburiy (`APP_ENV=demo` test serverda o'chiq).
 - `.env`da `TOTP_ENC_KEY` bo'lmasa api ishga tushmaydi (yaratish buyrug'i `.env.example`da). Kalit almashtirilsa barcha adminlar 2FA'ni qayta ulaydi.
+- **GPS (gps-worker, PR-B):** `.env`ga `GPS_ENC_KEY` (TOTP kalitidan **boshqa** Fernet kaliti, o'sha buyruq bilan), `GPS_WORKER_ENABLED=true`.
+  Kalitsiz gps-worker ishga tushmaydi, api esa ishlayveradi (GPS ulanishi o'chiq). Ulash: admin.csw.uz → Geozonalar → «GPS ulanishlari» →
+  «Ulanish qo'shish» → «Ulash» (SmartGPS'ning o'z kirish sahifasi; token faqat o'qish, bazada shifrlangan). Holat: `../dc logs gps-worker --tail 50`.
+  Test serverda worker `gps-mock` (soxta SmartGPS) bilan ishlaydi — haqiqiy SmartGPS ulanmaydi.
 - Birinchi kirishda: parol → QR kod (Google/Microsoft Authenticator) → 6 xonali kod → 10 ta zaxira kod (bir marta ko'rsatiladi, «Saqlab oldim»).
 - Keyin har login'da kod so'raladi; telefon yo'q bo'lsa — zaxira kod (har biri bir marta, Vaziyat paneliga yoziladi).
 - Telefon va zaxira kodlar yo'qolsa: boshqa admin «Xodimlar» → «2FA'ni qayta o'rnatish» (sabab majburiy). Kamida 2 ta faol admin bo'lsin

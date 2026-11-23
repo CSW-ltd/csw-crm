@@ -12,6 +12,7 @@ import { DriverHome } from "@/pages/driver/DriverHome";
 import { GpsHome } from "@/pages/gps/GpsHome";
 import { OperatorHome } from "@/pages/operator/OperatorHome";
 import { AdminHome } from "@/pages/admin/AdminHome";
+import { GpsCallback } from "@/pages/admin/GpsCallback";
 import { CompanyPage } from "@/pages/admin/CompanyPage";
 import { ChangePasswordPage } from "@/pages/ChangePasswordPage";
 import { afterLoginPath } from "@/lib/routes";
@@ -89,6 +90,7 @@ export function App() {
         <Route path="/driver/requests/:id" element={<RequireRole roles={["driver"]}><DriverSection><ActPage /></DriverSection></RequireRole>} />
         <Route path="/gps" element={<RequireRole roles={["gps"]}><DriverLayout><GpsHome /></DriverLayout></RequireRole>} />
         <Route path="/admin" element={<RequireRole roles={["admin", "manager", "legal", "accountant"]}><DriverLayout wide><AdminHome /></DriverLayout></RequireRole>} />
+        <Route path="/admin/gps-callback/:id" element={<RequireRole roles={["admin"]}><DriverLayout wide><GpsCallback /></DriverLayout></RequireRole>} />
         <Route path="/admin/korxona/:id/:view?" element={<RequireRole roles={["admin", "manager", "legal", "accountant"]}><DriverLayout wide><CompanyPage /></DriverLayout></RequireRole>} />
         <Route path="/operator" element={<RequireRole roles={["operator"]}><DriverLayout wide><OperatorHome /></DriverLayout></RequireRole>} />
         <Route path="/change-password" element={<ChangePasswordPage />} />

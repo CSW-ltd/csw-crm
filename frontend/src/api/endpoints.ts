@@ -1,7 +1,7 @@
 import { api } from "./client";
 import { clearTokens, saveTokens, type Tokens } from "@/lib/session";
 import { closeSocket } from "@/lib/socket";
-import type { ContractCheck, ContractDraft, ContractItem, StirLookup, Geofence, LocationQueueItem, NotificationItem, ExistingImportResult, TariffOverview, InvoiceItem, PaymentImportResult, GpsImportReport, GpsImportSummary, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
+import type { ContractCheck, ContractDraft, ContractItem, StirLookup, Geofence, LocationQueueItem, NotificationItem, ExistingImportResult, TariffOverview, InvoiceItem, PaymentImportResult, GpsImportReport, GpsImportSummary, GpsSourcesOverview, GpsSyncLogRow, MonthForm, MonthFormCustomer, ProviderReq, CompanyCompare, CompanyRow, GreenItem, PaymentItem, Access, AdminUser, Appeal, OrderFormBrief, OrderPaper, ScheduleDay, ScheduleRow, Service, VehicleOption, RequestDetail, RequestItem, RequestSource, Stats, WasteType, AdminVehicle, DistrictRadius, CompleteResult, Coords, ContractType, CustomerDetail, CustomerListItem, District, DriverTask, FailReason, FileKind,
   ImportBatch, ImportResult, LocationStatus, Region, Role, SituationEvent, SituationLevel, User } from "@/types";
 
 export const locationsApi = {
@@ -314,6 +314,18 @@ export const dispatchApi = {
     return api.post<GpsImportReport>("/dispatch/import/apply", fd, { timeout: 300_000 }).then((r) => r.data);
   },
   summary: () => api.get<GpsImportSummary>("/dispatch/summary").then((r) => r.data),
+  /** PR-B: SmartGPS/Wialon ulanishlari — token faqat o'qish, shifrlangan; tekshiruv va sinxron gps-worker'da */
+  sources: () => api.get<GpsSourcesOverview>("/dispatch/sources").then((r) => r.data),
+  createSource: (body: { system: string; server: string; account: string; district_id: number | null; unit_group: string | null }) =>
+    api.post<{ id: number }>("/dispatch/sources", body).then((r) => r.data),
+  updateSource: (id: number, body: { district_id?: number | null; unit_group?: string | null; account?: string; is_active?: boolean }) =>
+    api.patch(`/dispatch/sources/${id}`, body).then((r) => r.data),
+  connectUrl: (id: number, redirect: string) =>
+    api.get<{ url: string }>(`/dispatch/sources/${id}/connect-url`, { params: { redirect } }).then((r) => r.data.url),
+  setToken: (id: number, token: string) => api.put<{ token_status: string }>(`/dispatch/sources/${id}/token`, { token }).then((r) => r.data),
+  clearToken: (id: number) => api.delete(`/dispatch/sources/${id}/token`).then((r) => r.data),
+  sync: (id: number) => api.post(`/dispatch/sources/${id}/sync`).then((r) => r.data),
+  log: (id: number) => api.get<GpsSyncLogRow[]>(`/dispatch/sources/${id}/log`).then((r) => r.data),
 };
 
 export const tariffsApi = {

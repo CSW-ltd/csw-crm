@@ -64,12 +64,13 @@ Muhim: testlar SQLite'da ishlaydi — MySQL'ga xos xatolar ko'rinmaydi. Baza/dra
 
 ## Kod konvensiyalari
 
-- **Migratsiyalar:** `backend/alembic/versions/NNNN_nom.py`, ketma-ket raqam (oxirgisi `0026_admin_totp`, keyingisi `0027_...`). SQLite uchun `batch_alter_table` ishlatiladi.
+- **Migratsiyalar:** `backend/alembic/versions/NNNN_nom.py`, ketma-ket raqam (oxirgisi `0027_gps_connect`, keyingisi `0028_...`). SQLite uchun `batch_alter_table` ishlatiladi.
 - **Huquqlar:** `backend/app/core/permissions.py` — modul/amal katalogi va rol shablonlari (`apply_template`); tekshiruv `actor.can("modul.amal")`, frontendda `useCan`.
 - **i18n:** `frontend/src/i18n/messages.ts`, har kalit `[uz, ru, en]`. Yangi kalitlar `"  // backend xato kodlari\n"` markeridan oldinga qo'shiladi.
 - **Xatolar:** backend mashina o'qiydigan xato kodlari qaytaradi (masalan `reason_required`), frontend ularni i18n orqali ko'rsatadi.
 - **Vaziyat paneli:** muhim hodisalar `situation.add(...)` orqali; yangi tur qo'shilsa `SITUATION_KINDS` (frontend) va `KIND_UZ` (eksport) ham yangilanadi.
 - Arxitektura: `api/v1/*` (router) → `services/*` (biznes qoidalar) → `repositories/*` (so'rovlar) → `models`.
+- **GPS (qaror 2026-11-24, `docs/plans/gps-dispatch.md`):** SmartGPS/Wialon bilan faqat `gps-worker` konteyneri ishlaydi (`python -m app.gps_worker`, o'sha api rasmi, CPU/xotira chegarasi). `app/gps/` — faqat worker kodi; API SmartGPS'ga chiqmaydi, faqat bazaga belgi qo'yadi va natijani o'qiydi. `app/gps/client.py` faqat `READ_ONLY` buyruqlarni yuboradi — SmartGPS'da hech narsa o'zgartirilmaydi; token faqat o'qish (0x300), `GPS_ENC_KEY` bilan shifrlangan. Testlar va test server — `app/gps/mock_server.py` (sun'iy ma'lumot). Haqiqiy shablon, guruh, akkaunt nomlari repoda emas — admin panelida, bazada.
 
 ## Muhim biznes qoidalari
 

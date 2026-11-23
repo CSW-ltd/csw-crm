@@ -80,6 +80,59 @@ def _zone(feat: dict) -> Zone | None:
     return z
 
 
+def _color(c) -> str:
+    try:
+        return "#%06x" % (int(c) & 0xFFFFFF)
+    except (TypeError, ValueError):
+        return "#3388ff"
+
+
+def zone_from_wialon(z: dict, resource_id: int) -> Zone | None:
+    """Wialon `resource/get_zone_data` (flags 0x1F) natijasidan Zone — gps_eksport.py bilan aynan bir xil GeoJSON va xesh
+    (zip importi va jonli sinxron bir-birini «o'zgardi» deb ko'rmasligi uchun)."""
+    pts = [[p["x"], p["y"]] for p in z.get("p") or [] if "x" in p and "y" in p]
+    t = z.get("t")
+    if not pts:
+        return None
+    if t == 1:
+        geom = {"type": "LineString", "coordinates": pts if len(pts) > 1 else pts * 2}
+    elif t == 2:
+        geom = {"type": "Polygon", "coordinates": [pts + ([pts[0]] if pts[0] != pts[-1] else [])]}
+    elif t == 3:
+        geom = {"type": "Point", "coordinates": pts[0]}
+    else:
+        return None
+    props = {"resurs_id": resource_id, "id": z.get("id"), "nom": z.get("n"), "kenglik_m": z.get("w") if t == 1 else None,
+             "radius_m": (z.get("p") or [{}])[0].get("r") if t == 3 else None, "rang": _color(z.get("c"))}
+    return _zone({"geometry": geom, "properties": props})
+
+
+async def upsert_zones(db: AsyncSession, source_id: int, zones: dict[tuple[int, int], Zone]) -> tuple[dict, dict]:
+    """Geozonalarni xesh bo'yicha yangilaydi; ro'yxatda yo'qlari is_active=False. Qaytaradi: (sonlar, {kalit: geozone.id})."""
+    existing = {(g.ext_resource_id, g.ext_id): g for g in (await db.execute(select(Geozone).where(Geozone.source_id == source_id))).scalars()}
+    n = {"new": 0, "changed": 0, "deactivated": 0}
+    for k, z in zones.items():
+        g = existing.get(k)
+        if g is None:
+            g = Geozone(source_id=source_id, ext_resource_id=z.res, ext_id=z.ext)
+            db.add(g)
+            existing[k] = g
+            n["new"] += 1
+        elif g.hash == z.hash and g.is_active:
+            continue
+        else:
+            n["changed"] += 1
+        g.kind, g.name, g.width_m, g.radius_m, g.color, g.hash, g.is_active = z.kind, z.name, z.width, z.radius, z.color, z.hash, True
+        g.coords = json.dumps(z.coords, separators=(",", ":"))
+        g.min_lat, g.max_lat, g.min_lng, g.max_lng = z.bbox
+    for k, g in existing.items():
+        if k not in zones and g.is_active:
+            g.is_active = False
+            n["deactivated"] += 1
+    await db.flush()
+    return n, {k: g.id for k, g in existing.items() if k in zones}
+
+
 def read_zip(content: bytes) -> Bundle:
     if len(content) > MAX_ZIP:
         raise AppError(413, "import_too_large", "Zip 10 MB dan katta — faqat geojson/ va mfy_xarita/ papkalarini qo'shing")
@@ -152,6 +205,27 @@ def _vehicle_matches(units: dict[int, str], vehicles: list[Vehicle]) -> tuple[di
     return out, missing
 
 
+async def link_vehicles(db: AsyncSession, source_id: int, district_id: int, units: dict[int, str]) -> int:
+    """Tumanning faol CRM mashinalari ↔ GPS obyektlari (davlat raqami bo'yicha). Mashina yaratilmaydi. Qaytaradi: o'zgargan bog'lanishlar."""
+    vehicles = list((await db.execute(select(Vehicle).where(Vehicle.district_id == district_id, Vehicle.is_active.is_(True)))).scalars())
+    matched, _ = _vehicle_matches(units, vehicles)
+    links = {l.ext_unit_id: l for l in (await db.execute(select(VehicleLink).where(VehicleLink.source_id == source_id))).scalars()}
+    vids, n = {v.id for v in vehicles}, 0
+    for l in list(links.values()):  # shu tuman mashinasining eski (endi mos kelmagan) bog'lanishi
+        if l.vehicle_id in vids and matched.get(l.vehicle_id) != l.ext_unit_id:
+            await db.delete(l)
+            links.pop(l.ext_unit_id)
+    for vid, uid in matched.items():
+        l = links.get(uid)
+        if l is None:
+            db.add(VehicleLink(vehicle_id=vid, source_id=source_id, ext_unit_id=uid, ext_name=units[uid][:150], has_gps=True))
+            n += 1
+        elif l.vehicle_id != vid or l.ext_name != units[uid][:150]:
+            l.vehicle_id, l.ext_name = vid, units[uid][:150]
+            n += 1
+    return n
+
+
 async def analyze(db: AsyncSession, b: Bundle, mapping: dict[str, int] | None = None) -> dict:
     """Dry-run: geozona o'zgarishlari va har bo'lim (tuman) bo'yicha sonlar. Bazaga yozmaydi."""
     mapping = mapping or {}
@@ -213,23 +287,7 @@ async def apply(db: AsyncSession, actor: User, b: Bundle, mapping: dict[str, int
         db.add(src)
         await db.flush()
     # --- geozonalar
-    existing = {(g.ext_resource_id, g.ext_id): g for g in (await db.execute(select(Geozone).where(Geozone.source_id == src.id))).scalars()}
-    for k, z in b.zones.items():
-        g = existing.get(k)
-        if g is None:
-            g = Geozone(source_id=src.id, ext_resource_id=z.res, ext_id=z.ext)
-            db.add(g)
-            existing[k] = g
-        elif g.hash == z.hash and g.is_active:
-            continue
-        g.kind, g.name, g.width_m, g.radius_m, g.color, g.hash, g.is_active = z.kind, z.name, z.width, z.radius, z.color, z.hash, True
-        g.coords = json.dumps(z.coords, separators=(",", ":"))
-        g.min_lat, g.max_lat, g.min_lng, g.max_lng = z.bbox
-    for k, g in existing.items():
-        if k not in b.zones and g.is_active:
-            g.is_active = False
-    await db.flush()
-    zid = {k: g.id for k, g in existing.items() if k in b.zones}
+    _, zid = await upsert_zones(db, src.id, b.zones)
 
     # --- bo'limlar (tumanlar)
     stats = {"mahallas_created": 0, "mahallas_updated": 0, "mahallas_deactivated": 0, "links_changed": 0, "vehicles_linked": 0}
@@ -266,22 +324,7 @@ async def apply(db: AsyncSession, actor: User, b: Bundle, mapping: dict[str, int
                 db.add_all([MahallaGeozone(mahalla_id=m.id, geozone_id=g, role=r) for g, r in sorted(want)])
                 stats["links_changed"] += 1
         # --- mashinalar
-        vehicles = list((await db.execute(select(Vehicle).where(Vehicle.district_id == did, Vehicle.is_active.is_(True)))).scalars())
-        matched, _ = _vehicle_matches(s["units"], vehicles)
-        links = {(l.ext_unit_id): l for l in (await db.execute(select(VehicleLink).where(VehicleLink.source_id == src.id))).scalars()}
-        vids = {v.id for v in vehicles}
-        for l in list(links.values()):  # shu tuman mashinasining eski (endi mos kelmagan) bog'lanishi
-            if l.vehicle_id in vids and matched.get(l.vehicle_id) != l.ext_unit_id:
-                await db.delete(l)
-                links.pop(l.ext_unit_id)
-        for vid, uid in matched.items():
-            l = links.get(uid)
-            if l is None:
-                db.add(VehicleLink(vehicle_id=vid, source_id=src.id, ext_unit_id=uid, ext_name=s["units"][uid][:150], has_gps=True))
-                stats["vehicles_linked"] += 1
-            elif l.vehicle_id != vid or l.ext_name != s["units"][uid][:150]:
-                l.vehicle_id, l.ext_name = vid, s["units"][uid][:150]
-                stats["vehicles_linked"] += 1
+        stats["vehicles_linked"] += await link_vehicles(db, src.id, did, s["units"])
     z = report["zones"]
     situation.activity(db, "act_gps_import", f"GPS geozonalari import qilindi: {b.server} — geozona {z['total']} (yangi {z['new']}, "
                                              f"o'zgargan {z['changed']}, o'chgan {z['deactivated']}), tumanlar {len(mapping)}",
