@@ -17,6 +17,9 @@ users:
   - username: bosh.admin
     full_name: Bosh administrator
     role: admin
+  - username: zaxira.admin          # kamida 2 ta admin — 2FA tiklash uchun (README «Admin 2FA»)
+    full_name: Zaxira administrator
+    role: admin
   - username: menejer.namuna
     full_name: Namuna Menejer
     role: manager
@@ -29,3 +32,11 @@ users:
     full_name: Namuna Buxgalter
     role: accountant
     districts: [Birinchi tumani, Ikkinchi tumani]
+  - username: gps.birinchi
+    full_name: Namuna GPS xodimi
+    role: gps
+    district: Birinchi tumani
+  - username: haydovchi.birinchi1
+    full_name: Namuna Haydovchi
+    role: driver
+    district: Birinchi tumani

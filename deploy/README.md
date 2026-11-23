@@ -124,8 +124,23 @@ cp ../bootstrap.example.yaml bootstrap.yaml && chmod 600 bootstrap.yaml   # tahr
 Vaqtinchalik parollar terminalga **bir marta** chiqadi — xodimlarga xavfsiz kanal orqali bering; birinchi kirishda almashtiriladi.
 Qayta ishga tushirish mavjud loginlarni o'zgartirmaydi (yangi xodim qo'shish uchun faylga qo'shib, yana ishga tushiring).
 
-`ACTIVE_ROLES=admin,manager,legal,accountant,gps` (1-bosqich; `gps` — GPS xodimi, portali `dispatch.csw.uz`): boshqa rollar kira olmaydi (`role_inactive`), ular uchun xodim yaratilmaydi.
+`ACTIVE_ROLES=admin,manager,legal,accountant,gps,driver` (1-bosqich, Angor pilot; `gps` — `dispatch.csw.uz`, `driver` — `driver.csw.uz`): boshqa rollar kira olmaydi (`role_inactive`), ular uchun xodim yaratilmaydi.
 Rolni ochish: `.env`ga qo'shing → `../deploy.sh $(cat .image-tag)`.
+
+### Yangi tuman ochish (pilot: Angor, keyin birma-bir)
+
+Kod o'zgarmaydi — har tuman shu tartibda. Haqiqiy ism, telefon, raqamlar faqat serverdagi `bootstrap.yaml`da va admin panelda.
+
+1. **Zaxira:** csw-db'da `backup.sh`.
+2. **Tuman va xodimlar:** `bootstrap.yaml`ga tuman (viloyat `districts` ro'yxatiga) va xodimlar (manager/legal/accountant —
+   `districts: [...]`, gps/driver — `district: ...`) → `../dc exec -T api python -m app.bootstrap /dev/stdin < bootstrap.yaml`.
+   Vaqtinchalik parollar bir marta chiqadi — xavfsiz kanal orqali bering.
+3. **Admin panel → «Ta'riflar»:** tuman tarifi (sanasi bilan).
+4. **«Mashinalar»:** tuman mashinalari (davlat raqami GPS'dagi bilan bir xil yozilsin — import shu bo'yicha bog'laydi).
+5. **«GPS geozonalar»:** shu tuman eksport zip'i → «Tekshirish» (bo'limni CRM tumaniga moslang, sonlarni agent bilan solishtiring) → «Import».
+6. **«Sozlamalar»:** tuman radiusi (kerak bo'lsa), printer rejimi.
+7. **GPS xodimi** (`dispatch.csw.uz`): «Kunlik ish jadvali» — mashina ↔ haydovchi; haydovchi `driver.csw.uz`da smenani ochadi.
+8. **Tekshiruv:** har rol o'z portalida kiradi; bitta sinov murojaati: murojaat → biriktirish → varaqa → yopish → Vaziyat paneli.
 
 ## 3. csw-test
 
