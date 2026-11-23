@@ -83,7 +83,9 @@ async def test_new_contract_starts_today(world, client_factory):
     req = {**REQ, "stir": STIR, "name": "Bugungi MChJ"}
     r = await legal.post("/api/v1/contracts", json=body(cust["id"], requisites=req, valid_from=str(T - timedelta(days=40))))
     assert r.status_code == 201, r.text
-    assert r.json()["valid_from"] == str(T)
+    # Server sanani Toshkent vaqtida oladi (UTC 19:00 dan keyin date.today() bilan farq qiladi)
+    from app.db.base import utcnow
+    assert r.json()["valid_from"] == str((utcnow() + timedelta(hours=5)).date())
 
 
 async def test_requests_for_existing_counterparty(world, client_factory):
