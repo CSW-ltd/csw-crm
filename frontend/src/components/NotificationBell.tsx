@@ -49,6 +49,8 @@ export function NotificationBell() {
           <Box key={n.id} data-notif={n.kind} sx={{ px: 2, py: 1.25, borderBottom: 1, borderColor: "divider", bgcolor: n.read ? undefined : "action.hover" }}>
             <Typography variant="body2" fontWeight={n.read ? 400 : 600}>{text(n)}</Typography>
             <Typography variant="caption" color="text.secondary">{formatDateTime(new Date(n.created_at + "Z"))}</Typography>
+            {n.ref_type === "gps_source" && <Button size="small" href="/admin#geozones" sx={{ ml: 1 }} data-notif-action="gps-connect"
+              onClick={() => setAnchor(null)}>{t("notif_gps_connect")}</Button>}
           </Box>
         ))}
       </Popover>

@@ -371,7 +371,10 @@ export interface GpsSyncStats { resources: number; zones: number; zones_new: num
 export interface GpsSourceRow { id: number; system: "smartgps" | "wialon"; server: string; account: string; district_id: number | null;
   district: string | null; unit_group: string | null; is_active: boolean; token_status: GpsTokenStatus; token_user: string | null;
   token_set_at: string | null; sync_requested: boolean; last_sync_at: string | null; last_error: string | null; zones: number; groups: number;
-  vehicles_linked: number; last_stats: GpsSyncStats | null }
+  vehicles_linked: number; last_stats: GpsSyncStats | null;
+  backup_account: string | null; backup_token_status: GpsTokenStatus; backup_token_user: string | null; backup_token_set_at: string | null;
+  active_slot: GpsSlot; token_checked_at: string | null; alert_state: string }
+export type GpsSlot = "main" | "backup";
 export interface GpsSourcesOverview { worker: { seen_at: string | null; alive: boolean; enabled: boolean }; encryption_ready: boolean;
   sources: GpsSourceRow[] }
 export interface GpsSyncLogRow { id: number; started_at: string; finished_at: string | null; ok: boolean; stats: GpsSyncStats | null; error: string | null }

@@ -2,6 +2,7 @@
 FAQAT O'QISH: client.py faqat o'qish buyruqlarini yuboradi. Mahallalar bu yerda o'zgarmaydi (qamrov bosqichida).
 
 Xavfsizlik:
+- token: faol (asosiy/zaxira), rad etilsa ikkinchisi — app/gps/tokens.py;
 - token egasi `gps_sources.account` bo'lishi kerak (boshqa akkaunt tokeni rad etiladi);
 - token o'zgartirish huquqiga ega bo'lsa — rad etiladi (faqat 0x300);
 - SmartGPS'dan geozona kelmasa (huquq yo'q, server xatosi) — CRM'dagi geozonalar o'chirilmaydi."""
@@ -14,7 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core import secretbox
 from app.db.base import utcnow
-from app.gps.client import GpsError, WialonClient, is_read_only
+from app.gps import tokens
+from app.gps.client import GpsError, WialonClient
 from app.models import Geozone, GeozoneGroup, GpsSource, GpsSyncLog
 from app.services import situation
 from app.services.gps.importer import Zone, link_vehicles, upsert_zones, zone_from_wialon
@@ -61,38 +63,54 @@ async def _units(c: WialonClient, unit_group: str | None) -> tuple[dict[int, str
     return {i: n for i, n in units.items() if i in members}, True
 
 
+async def _fetch(c: WialonClient, unit_group: str | None) -> tuple[list, dict, dict, dict[int, str], bool]:
+    zones: dict[tuple[int, int], Zone] = {}
+    groups: dict[tuple[int, int], tuple[str, list[int]]] = {}
+    resources = await c.search("avl_resource", F_BASE | F_ZONES | F_ZGROUPS)
+    for res in resources:
+        rid = int(res["id"])
+        ids = sorted(int(k) for k in (res.get("zl") or {}))
+        for z in await c.zone_data(rid, ids) if ids else []:
+            zz = zone_from_wialon(z, rid)
+            if zz:
+                zones[(zz.res, zz.ext)] = zz
+        for g in (res.get("zg") or {}).values():
+            if g.get("id") is not None and g.get("n"):
+                groups[(rid, int(g["id"]))] = (str(g["n"]).strip(), sorted(int(x) for x in g.get("zns") or []))
+    units, group_found = await _units(c, unit_group)
+    return resources, zones, groups, units, group_found
+
+
 async def sync_source(db: AsyncSession, src: GpsSource, *, transport=None) -> GpsSyncLog:
-    """Bitta manbani sinxronlaydi. Natija gps_sync_log'ga va manbaning holatiga yoziladi (commit qilinadi)."""
+    """Bitta manbani sinxronlaydi. Natija gps_sync_log'ga va manbaning holatiga yoziladi (commit qilinadi).
+    Token: avval faol, u rad etilsa — ikkinchisi (shu aylanishning o'zida); o'ligi belgilanadi va adminlar ogohlantiriladi."""
     log = GpsSyncLog(source_id=src.id, started_at=utcnow())
     db.add(log)
     stats: dict = {}
-    authed = False
     try:
-        token = secretbox.decrypt(src.token_enc or "")
-        if not token:
-            raise GpsError("Token yo'q yoki ochilmadi (GPS_ENC_KEY o'zgarganmi?) — qayta «Ulash» kerak", 8)
-        async with WialonClient(src.server, transport=transport) as c:
-            user = await c.login(token)
-            if src.account and user and user.strip().lower() != src.account.strip().lower():
-                raise GpsError(f"Token «{user}» akkauntiga tegishli, bu ulanish «{src.account}» uchun", 8)
-            if not is_read_only(await c.token_access(token)):
-                raise GpsError("Token o'zgartirish huquqiga ega — faqat o'qish (0x300) token kerak", 7)
-            src.token_status, src.token_user = "ok", user or src.token_user
-            authed = True
-            zones: dict[tuple[int, int], Zone] = {}
-            groups: dict[tuple[int, int], tuple[str, list[int]]] = {}
-            resources = await c.search("avl_resource", F_BASE | F_ZONES | F_ZGROUPS)
-            for res in resources:
-                rid = int(res["id"])
-                ids = sorted(int(k) for k in (res.get("zl") or {}))
-                for z in await c.zone_data(rid, ids) if ids else []:
-                    zz = zone_from_wialon(z, rid)
-                    if zz:
-                        zones[(zz.res, zz.ext)] = zz
-                for g in (res.get("zg") or {}).values():
-                    if g.get("id") is not None and g.get("n"):
-                        groups[(rid, int(g["id"]))] = (str(g["n"]).strip(), sorted(int(x) for x in g.get("zns") or []))
-            units, group_found = await _units(c, src.unit_group)
+        slots = tokens.candidates(src)
+        if not slots:
+            raise GpsError("Ishlaydigan token yo'q — admin «Ulash» qilsin" + (f" ({src.last_error})" if src.last_error else ""))
+        fetched = None
+        for i, slot in enumerate(slots):
+            token = secretbox.decrypt(tokens.enc(src, slot) or "")
+            authed = False
+            try:
+                if not token:
+                    raise GpsError("Token ochilmadi (GPS_ENC_KEY o'zgarganmi?) — qayta «Ulash» kerak", 8)
+                async with WialonClient(src.server, transport=transport) as c:
+                    user = await tokens.verify(c, token, tokens.account(src, slot))
+                    tokens.set_slot(src, slot, status_="ok", **({"user": user} if user else {}))
+                    authed = True
+                    fetched = await _fetch(c, src.unit_group)
+                break
+            except GpsError as e:  # tarmoq xatosida token o'zgarmaydi — keyingi safar qayta uriniladi
+                if authed or not e.auth:
+                    raise
+                tokens.mark_dead(src, slot, e)
+                if i == len(slots) - 1:
+                    raise
+        resources, zones, groups, units, group_found = fetched
         active = (await db.execute(select(func.count()).where(Geozone.source_id == src.id, Geozone.is_active.is_(True)))).scalar_one()
         if not zones and active:
             raise GpsError("SmartGPS'dan birorta geozona kelmadi — CRM'dagi geozonalar o'zgartirilmadi")
@@ -107,8 +125,6 @@ async def sync_source(db: AsyncSession, src: GpsSource, *, transport=None) -> Gp
     except GpsError as e:  # bazaga yozish faqat barcha ma'lumot olingandan keyin — bu yerda yarim yozilgan narsa yo'q
         log.error = str(e)[:500]
         src.last_error = log.error
-        if not authed and e.code is not None:  # tarmoq xatosida token o'zgarmaydi — keyingi safar qayta uriniladi
-            src.token_status = "invalid"
     log.finished_at = src.last_sync_at = utcnow()
     src.sync_requested_at = None
     log.stats = json.dumps(stats, ensure_ascii=False) if stats else None
@@ -117,6 +133,7 @@ async def sync_source(db: AsyncSession, src: GpsSource, *, transport=None) -> Gp
                                             f"mashina bog'lanishi {stats.get('vehicles_linked', 0)}") if log.ok
                        else f"GPS sinxronlash xatosi: {src.server} — {log.error}",
                        params={"server": src.server, "ok": log.ok, **stats}, district_id=src.district_id)
+    await tokens.settle(db, src)
     await db.commit()
     return log
 
@@ -129,11 +146,11 @@ def local_now(now: datetime | None = None) -> datetime:
 
 def due(src: GpsSource, now: datetime, sync_time: str) -> bool:
     """Sinxronlash kerakmi: so'ralgan, yangi token, yoki bugungi kunlik vaqt o'tgan va bugun hali sinxronlanmagan."""
-    if not src.is_active or not src.token_enc:
+    if not src.is_active or not tokens.has_any(src):
         return False
-    if src.sync_requested_at is not None or src.token_status == "pending":
+    if src.sync_requested_at is not None or tokens.any_status(src, "pending"):
         return True
-    if src.token_status != "ok":
+    if not tokens.any_status(src, "ok"):
         return False
     loc = local_now(now)
     try:

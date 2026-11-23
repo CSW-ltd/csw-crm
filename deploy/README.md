@@ -111,6 +111,9 @@ Cheklovni qayta yoqish: `allow <IP>; ... deny all;` → `../dc exec edge nginx -
   Kalitsiz gps-worker ishga tushmaydi, api esa ishlayveradi (GPS ulanishi o'chiq). Ulash: admin.csw.uz → Geozonalar → «GPS ulanishlari» →
   «Ulanish qo'shish» → «Ulash» (SmartGPS'ning o'z kirish sahifasi; token faqat o'qish, bazada shifrlangan). Holat: `../dc logs gps-worker --tail 50`.
   Test serverda worker `gps-mock` (soxta SmartGPS) bilan ishlaydi — haqiqiy SmartGPS ulanmaydi.
+  **Zaxira token (tavsiya, har ulanishga):** «Zaxira akkaunt» maydoniga boshqa SmartGPS akkauntini yozib, «Zaxirani ulash». Worker har
+  soatda ikkala tokenni tekshiradi; asosiysi o'lsa o'zi zaxiraga o'tadi, Vaziyat paneli va adminlar qo'ng'iroqchasida «Ulash» havolasi
+  chiqadi. Parol hech qayerda saqlanmaydi; dispatch xodimi tokenni ko'rmaydi.
 - Birinchi kirishda: parol → QR kod (Google/Microsoft Authenticator) → 6 xonali kod → 10 ta zaxira kod (bir marta ko'rsatiladi, «Saqlab oldim»).
 - Keyin har login'da kod so'raladi; telefon yo'q bo'lsa — zaxira kod (har biri bir marta, Vaziyat paneliga yoziladi).
 - Telefon va zaxira kodlar yo'qolsa: boshqa admin «Xodimlar» → «2FA'ni qayta o'rnatish» (sabab majburiy). Kamida 2 ta faol admin bo'lsin

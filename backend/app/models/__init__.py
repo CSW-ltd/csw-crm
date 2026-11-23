@@ -484,6 +484,16 @@ class GpsSource(TimestampMixin, Base):
     sync_requested_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_sync_at: Mapped[datetime | None] = mapped_column(DateTime)
     last_error: Mapped[str | None] = mapped_column(String(500))
+    # Zaxira token (0028): asosiysi o'lsa worker o'zi zaxiraga o'tadi. Boshqa akkauntdan bo'lishi mumkin (bo'sh — asosiy akkaunt).
+    backup_account: Mapped[str | None] = mapped_column(String(100))
+    backup_token_enc: Mapped[str | None] = mapped_column(Text)
+    backup_token_status: Mapped[str] = mapped_column(String(10), default="none", server_default="none")
+    backup_token_user: Mapped[str | None] = mapped_column(String(100))
+    backup_token_set_at: Mapped[datetime | None] = mapped_column(DateTime)
+    active_slot: Mapped[str] = mapped_column(String(10), default="main", server_default="main")  # main | backup
+    token_checked_at: Mapped[datetime | None] = mapped_column(DateTime)  # oxirgi har soatlik tekshiruv
+    # ok | degraded (bitta token o'lik, ikkinchisi ishlayapti) | down (ishlaydigan token yo'q) — ogohlantirish faqat o'zgarganda
+    alert_state: Mapped[str] = mapped_column(String(10), default="ok", server_default="ok")
 
 
 class GeozoneGroup(Base):

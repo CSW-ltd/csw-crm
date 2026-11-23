@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import DB, require_perm
 from app.core.errors import invalid
+from app.gps import tokens
 from app.models import User
 from app.services.gps import connections, importer
 
@@ -62,6 +63,7 @@ class SourcePatch(BaseModel):
     district_id: int | None = None
     unit_group: str | None = Field(default=None, max_length=150)
     account: str | None = Field(default=None, max_length=100)
+    backup_account: str | None = Field(default=None, max_length=100)
     is_active: bool | None = None
 
 
@@ -95,15 +97,15 @@ async def connect_url(source_id: int, redirect: str, request: Request, user: Use
 
 
 @router.put("/sources/{source_id}/token")
-async def set_token(source_id: int, body: TokenIn, user: User = Connect, db: AsyncSession = DB) -> dict:
-    """Tokenni shifrlab saqlaydi; tekshiruv (egasi, faqat o'qish huquqi) va sinxronlash — gps-worker'da."""
-    src = await connections.set_token(db, user, source_id, body.token)
-    return {"token_status": src.token_status}
+async def set_token(source_id: int, body: TokenIn, slot: str = "main", user: User = Connect, db: AsyncSession = DB) -> dict:
+    """Tokenni shifrlab saqlaydi (slot: main | backup); tekshiruv (egasi, faqat o'qish huquqi) va sinxronlash — gps-worker'da."""
+    src = await connections.set_token(db, user, source_id, body.token, slot)
+    return {"token_status": tokens.status(src, slot)}
 
 
 @router.delete("/sources/{source_id}/token")
-async def clear_token(source_id: int, user: User = Connect, db: AsyncSession = DB) -> dict:
-    await connections.clear_token(db, user, source_id)
+async def clear_token(source_id: int, slot: str = "main", user: User = Connect, db: AsyncSession = DB) -> dict:
+    await connections.clear_token(db, user, source_id, slot)
     return {"ok": True}
 
 

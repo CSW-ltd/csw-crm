@@ -10,7 +10,7 @@ import { toast } from "@/lib/alerts";
  *  shifrlab saqlash uchun serverga yuboriladi, keyin «Geozonalar» tabiga qaytiladi. */
 export function GpsCallback() {
   const { t, tErr } = useI18n();
-  const { id } = useParams();
+  const { id, slot } = useParams();
   const [done, setDone] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const ran = useRef(false);
@@ -22,10 +22,10 @@ export function GpsCallback() {
     const svcErr = q.get("svc_error");
     window.history.replaceState(null, "", window.location.pathname);
     if (!token || (svcErr && svcErr !== "0")) { setErr(t("gpsc_cb_failed")); return; }
-    dispatchApi.setToken(Number(id), token)
+    dispatchApi.setToken(Number(id), token, slot === "backup" ? "backup" : "main")
       .then(() => { toast(t("gpsc_token_saved"), "success"); setDone(true); })
       .catch((e) => setErr(tErr(errorCode(e), errorMessage(e))));
-  }, [id, t, tErr]);
+  }, [id, slot, t, tErr]);
   if (done) return <Navigate to="/admin#geozones" replace />;
   return (
     <Stack spacing={2} alignItems="center" sx={{ mt: 6 }}>

@@ -10,26 +10,31 @@ import { dispatchApi } from "@/api/endpoints";
 import { errorCode, errorMessage } from "@/api/client";
 import { useI18n } from "@/i18n/I18nContext";
 import { toast } from "@/lib/alerts";
-import type { District, GpsSourceRow, GpsSourcesOverview, GpsSyncLogRow, GpsTokenStatus } from "@/types";
+import type { District, GpsSlot, GpsSourceRow, GpsSourcesOverview, GpsSyncLogRow, GpsTokenStatus } from "@/types";
 
 const when = (iso: string | null) => (iso ? new Date(iso + "Z").toLocaleString("ru-RU", { timeZone: "Asia/Tashkent" }).slice(0, 17) : "—");
 const TOKEN_COLOR: Record<GpsTokenStatus, "default" | "warning" | "success" | "error"> = { none: "default", pending: "warning", ok: "success", invalid: "error" };
-type Form = { id?: number; system: string; server: string; account: string; district_id: number | ""; unit_group: string };
-const EMPTY: Form = { system: "smartgps", server: "", account: "", district_id: "", unit_group: "" };
+type Form = { id?: number; system: string; server: string; account: string; backup_account: string; district_id: number | ""; unit_group: string };
+const EMPTY: Form = { system: "smartgps", server: "", account: "", backup_account: "", district_id: "", unit_group: "" };
 
+/** Har ulanishda ikki token: asosiy va zaxira (boshqa akkauntdan bo'lishi mumkin). Worker har soatda tekshiradi, o'lsa o'zi zaxiraga
+ *  o'tadi va adminlarga bildirishnoma yuboradi (qo'ng'iroqchadagi «Ulash» shu panelga olib keladi). */
 /** Admin: SmartGPS/Wialon ulanishlari (PR-B). «Ulash» — SmartGPS'ning o'z kirish sahifasi (parol CRM'ga kelmaydi), token faqat
  *  o'qish huquqli va bazada shifrlangan. Tekshiruv va sinxronlash — gps-worker (30 soniya ichida). */
 export function GpsSourcesPanel({ districts }: { districts: District[] }) {
   const { t, tErr } = useI18n();
   const [data, setData] = useState<GpsSourcesOverview | null>(null);
   const [form, setForm] = useState<Form | null>(null);
-  const [paste, setPaste] = useState<{ id: number; token: string } | null>(null);
+  const [paste, setPaste] = useState<{ id: number; slot: GpsSlot; token: string } | null>(null);
   const [log, setLog] = useState<{ src: GpsSourceRow; rows: GpsSyncLogRow[] } | null>(null);
   const [busy, setBusy] = useState(false);
   const fail = useCallback((e: unknown) => toast(tErr(errorCode(e), errorMessage(e)), "error"), [tErr]);
   const load = useCallback(() => dispatchApi.sources().then(setData).catch(fail), [fail]);
   useEffect(() => { load(); }, [load]);
-  const waiting = !!data?.sources.some((s) => s.token_status === "pending" || s.sync_requested);
+  const waiting = !!data?.sources.some((s) => s.token_status === "pending" || s.backup_token_status === "pending" || s.sync_requested);
+  useEffect(() => {  // qo'ng'iroqchadagi «Ulash» → /admin#geozones: panelga aylantiriladi
+    if (data && window.location.hash === "#geozones") document.getElementById("gps-sources")?.scrollIntoView({ block: "start" });
+  }, [!!data]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!waiting) return;
     const h = window.setInterval(load, 5000);
@@ -41,22 +46,26 @@ export function GpsSourcesPanel({ districts }: { districts: District[] }) {
     setBusy(true);
     try {
       const body = { district_id: form.district_id === "" ? null : form.district_id, unit_group: form.unit_group.trim() || null };
-      if (form.id) await dispatchApi.updateSource(form.id, { ...body, account: form.account.trim() });
-      else await dispatchApi.createSource({ ...body, system: form.system, server: form.server.trim(), account: form.account.trim() });
+      const backup_account = form.backup_account.trim() || null;
+      if (form.id) await dispatchApi.updateSource(form.id, { ...body, account: form.account.trim(), backup_account });
+      else {
+        const { id } = await dispatchApi.createSource({ ...body, system: form.system, server: form.server.trim(), account: form.account.trim() });
+        if (backup_account) await dispatchApi.updateSource(id, { backup_account });
+      }
       setForm(null);
       await load();
     } catch (e) { fail(e); } finally { setBusy(false); }
   };
-  const connect = async (s: GpsSourceRow) => {
+  const connect = async (s: GpsSourceRow, slot: GpsSlot = "main") => {
     try {
-      const url = await dispatchApi.connectUrl(s.id, `${window.location.origin}/admin/gps-callback/${s.id}`);
+      const url = await dispatchApi.connectUrl(s.id, `${window.location.origin}/admin/gps-callback/${s.id}${slot === "backup" ? "/backup" : ""}`);
       window.location.assign(url);
     } catch (e) { fail(e); }
   };
   const savePasted = async () => {
     if (!paste) return;
     setBusy(true);
-    try { await dispatchApi.setToken(paste.id, paste.token.trim()); setPaste(null); toast(t("gpsc_token_saved"), "success"); await load(); }
+    try { await dispatchApi.setToken(paste.id, paste.token.trim(), paste.slot); setPaste(null); toast(t("gpsc_token_saved"), "success"); await load(); }
     catch (e) { fail(e); } finally { setBusy(false); }
   };
   const act = async (fn: () => Promise<unknown>) => { try { await fn(); await load(); } catch (e) { fail(e); } };
@@ -72,6 +81,11 @@ export function GpsSourcesPanel({ districts }: { districts: District[] }) {
       </Stack>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>{t("gpsc_hint")}</Typography>
       {data && !data.encryption_ready && <Alert severity="warning" sx={{ mb: 1 }}>{t("gpsc_no_key")}</Alert>}
+      {data?.sources.filter((s) => s.is_active && s.alert_state !== "ok").map((s) =>
+        <Alert key={s.id} severity={s.alert_state === "down" ? "error" : "warning"} sx={{ mb: 1 }} data-alert={s.id}
+          action={<Button color="inherit" size="small" startIcon={<LinkIcon />} onClick={() => connect(s, s.alert_state === "d:backup" ? "backup" : "main")}>
+            {t("gpsc_connect")}</Button>}>
+          {t(s.alert_state === "down" ? "gpsc_alert_down" : "gpsc_alert_dead", { server: s.server })}</Alert>)}
       <TableContainer><Table size="small">
         <TableHead><TableRow><TableCell>{t("gpsc_server")}</TableCell><TableCell>{t("district")}</TableCell>
           <TableCell>{t("gpsc_unit_group")}</TableCell><TableCell>{t("gpsc_token")}</TableCell><TableCell>{t("gpsc_last_sync")}</TableCell>
@@ -81,8 +95,24 @@ export function GpsSourcesPanel({ districts }: { districts: District[] }) {
             <TableCell><b>{s.server}</b><Typography variant="caption" display="block" color="text.secondary">{s.system} · {s.account}</Typography></TableCell>
             <TableCell>{s.district ?? "—"}</TableCell>
             <TableCell>{s.unit_group ?? <Typography variant="caption" color="text.secondary">{t("gpsc_all_units")}</Typography>}</TableCell>
-            <TableCell><Chip size="small" color={TOKEN_COLOR[s.token_status]} label={t(`gpsc_tok_${s.token_status}`)} />
-              {s.token_user && <Typography variant="caption" display="block" color="text.secondary">{s.token_user} · {when(s.token_set_at)}</Typography>}</TableCell>
+            <TableCell sx={{ minWidth: 230 }}>
+              {(["main", "backup"] as const).map((slot) => {
+                const st = slot === "main" ? s.token_status : s.backup_token_status;
+                const user = slot === "main" ? s.token_user : s.backup_token_user;
+                const at = slot === "main" ? s.token_set_at : s.backup_token_set_at;
+                return <Box key={slot} data-slot={slot} sx={{ mb: 0.75 }}>
+                  <Stack direction="row" spacing={0.75} alignItems="center">
+                    <Typography variant="caption" sx={{ width: 52 }}>{t(slot === "main" ? "gpsc_main" : "gpsc_backup")}</Typography>
+                    <Chip size="small" color={TOKEN_COLOR[st]} label={t(`gpsc_tok_${st}`)} />
+                    {st === "ok" && s.active_slot === slot && <Chip size="small" variant="outlined" color="success" label={t("gpsc_active")} />}
+                  </Stack>
+                  {user && <Typography variant="caption" display="block" color="text.secondary" sx={{ pl: "58px" }}>{user} · {when(at)}</Typography>}
+                </Box>;
+              })}
+              {s.token_checked_at && <Typography variant="caption" display="block" color="text.secondary">{t("gpsc_checked", { t: when(s.token_checked_at) })}</Typography>}
+              {s.token_status !== "none" && s.backup_token_status === "none" &&
+                <Typography variant="caption" display="block" color="warning.main">{t("gpsc_no_backup")}</Typography>}
+            </TableCell>
             <TableCell sx={{ maxWidth: 320 }}>
               <Typography variant="body2">{s.sync_requested ? t("gpsc_sync_queued") : when(s.last_sync_at)}</Typography>
               {s.last_stats && <Typography variant="caption" display="block" color="text.secondary">
@@ -93,15 +123,22 @@ export function GpsSourcesPanel({ districts }: { districts: District[] }) {
             <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
               <Button size="small" variant={s.token_status === "ok" ? "text" : "contained"} disableElevation startIcon={<LinkIcon />}
                 onClick={() => connect(s)} disabled={!data.encryption_ready}>{t("gpsc_connect")}</Button>
+              <Button size="small" variant={s.backup_token_status === "invalid" ? "contained" : "text"} color={s.backup_token_status === "invalid" ? "warning" : "primary"}
+                disableElevation startIcon={<LinkIcon />} onClick={() => connect(s, "backup")} disabled={!data.encryption_ready} data-connect="backup">
+                {t("gpsc_connect_backup")}</Button>
               <Tooltip title={t("gpsc_sync_now")}><span><IconButton size="small" disabled={s.token_status === "none" || s.sync_requested}
                 onClick={() => act(() => dispatchApi.sync(s.id))}><SyncIcon fontSize="small" /></IconButton></span></Tooltip>
               <Tooltip title={t("gpsc_log")}><IconButton size="small" onClick={() => dispatchApi.log(s.id).then((rows) => setLog({ src: s, rows })).catch(fail)}>
                 <HistoryIcon fontSize="small" /></IconButton></Tooltip>
               <Tooltip title={t("edit")}><IconButton size="small" onClick={() => setForm({ id: s.id, system: s.system, server: s.server, account: s.account,
-                district_id: s.district_id ?? "", unit_group: s.unit_group ?? "" })}><EditIcon fontSize="small" /></IconButton></Tooltip>
+                backup_account: s.backup_account ?? "", district_id: s.district_id ?? "", unit_group: s.unit_group ?? "" })}><EditIcon fontSize="small" /></IconButton></Tooltip>
               <Box>
-                <Button size="small" onClick={() => setPaste({ id: s.id, token: "" })} disabled={!data.encryption_ready}>{t("gpsc_paste")}</Button>
-                {s.token_status !== "none" && <Button size="small" color="error" onClick={() => act(() => dispatchApi.clearToken(s.id))}>{t("gpsc_disconnect")}</Button>}
+                <Button size="small" onClick={() => setPaste({ id: s.id, slot: "main", token: "" })} disabled={!data.encryption_ready}>{t("gpsc_paste")}</Button>
+                <Button size="small" onClick={() => setPaste({ id: s.id, slot: "backup", token: "" })} disabled={!data.encryption_ready}>{t("gpsc_paste_backup")}</Button>
+                {s.token_status !== "none" && <Button size="small" color="error" onClick={() => act(() => dispatchApi.clearToken(s.id))}>
+                  {t("gpsc_disconnect")} ({t("gpsc_main")})</Button>}
+                {s.backup_token_status !== "none" && <Button size="small" color="error" onClick={() => act(() => dispatchApi.clearToken(s.id, "backup"))}>
+                  {t("gpsc_disconnect")} ({t("gpsc_backup")})</Button>}
                 <Button size="small" onClick={() => act(() => dispatchApi.updateSource(s.id, { is_active: !s.is_active }))}>
                   {s.is_active ? t("gpsc_pause") : t("gpsc_resume")}</Button>
               </Box>
@@ -120,6 +157,8 @@ export function GpsSourcesPanel({ districts }: { districts: District[] }) {
             onChange={(e) => setForm({ ...form, server: e.target.value })} />
           <TextField label={t("gpsc_account")} value={form.account} helperText={t("gpsc_account_hint")} id="gpsc-account"
             onChange={(e) => setForm({ ...form, account: e.target.value })} />
+          <TextField label={t("gpsc_backup_account")} value={form.backup_account} helperText={t("gpsc_backup_account_hint")} id="gpsc-backup-account"
+            onChange={(e) => setForm({ ...form, backup_account: e.target.value })} />
           <TextField select label={t("district")} value={form.district_id} onChange={(e) => setForm({ ...form, district_id: e.target.value === "" ? "" : Number(e.target.value) })}>
             <MenuItem value="">—</MenuItem>
             {districts.filter((d) => d.is_active).map((d) => <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>)}</TextField>
@@ -132,7 +171,7 @@ export function GpsSourcesPanel({ districts }: { districts: District[] }) {
       </Dialog>
 
       <Dialog open={!!paste} onClose={() => setPaste(null)} fullWidth maxWidth="sm">
-        <DialogTitle>{t("gpsc_paste")}</DialogTitle>
+        <DialogTitle>{t(paste?.slot === "backup" ? "gpsc_paste_backup" : "gpsc_paste")}</DialogTitle>
         <DialogContent><Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{t("gpsc_paste_hint")}</Typography>
           <TextField fullWidth autoComplete="off" label={t("gpsc_token")} value={paste?.token ?? ""} inputProps={{ spellCheck: false }}
             onChange={(e) => paste && setPaste({ ...paste, token: e.target.value })} /></DialogContent>

@@ -2,7 +2,8 @@
 
     python -m app.gps_worker
 
-Har 30 soniyada: heartbeat (admin panelida «Worker ishlayapti») → sinxronlash kerak bo'lgan manbalar (yangi token, «Hozir
+Har 30 soniyada: heartbeat (admin panelida «Worker ishlayapti») → token tekshiruvi (har soatda, yangi token — darhol; o'lsa
+zaxiraga o'tish va adminlarga ogohlantirish — app/gps/tokens.py) → sinxronlash kerak bo'lgan manbalar (yangi token, «Hozir
 sinxronlash», kunlik GPS_SYNC_TIME). API jarayoni SmartGPS'ga chiqmaydi — faqat bazaga belgi qo'yadi, worker bajaradi.
 Keyingi bosqichlarda jonli joylashuv va qamrov hisoblari ham shu yerga qo'shiladi."""
 import asyncio
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.core import secretbox
 from app.core.config import get_settings
 from app.db.base import utcnow
+from app.gps import tokens
 from app.gps.sync import due, sync_source
 from app.models import AppSetting, GpsSource
 
@@ -39,7 +41,16 @@ async def tick(sessionmaker: async_sessionmaker, *, transport=None) -> int:
     async with sessionmaker() as db:
         await heartbeat(db)
         now = utcnow()
-        ids = [src.id for src in (await db.execute(select(GpsSource).order_by(GpsSource.id))).scalars() if due(src, now, s.gps_sync_time)]
+        rows = list((await db.execute(select(GpsSource).order_by(GpsSource.id))).scalars())
+        ids = [src.id for src in rows if due(src, now, s.gps_sync_time)]  # tekshiruvdan oldin: yangi (pending) token ham sinxronlanadi
+        checks = [src.id for src in rows if tokens.need_check(src, now)]
+    for sid in checks:  # har soatlik token tekshiruvi (yangi token — darhol); o'lsa zaxiraga o'tish va ogohlantirish
+        async with sessionmaker() as db:
+            try:
+                await tokens.check_source(db, await db.get(GpsSource, sid), transport=transport)
+            except Exception:
+                log.exception("token tekshiruvi %s: kutilmagan xato", sid)
+                await db.rollback()
     n = 0
     for sid in ids:
         async with sessionmaker() as db:

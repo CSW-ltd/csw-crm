@@ -24,13 +24,13 @@ import HistoryIcon from "@mui/icons-material/History";
 export const ACTIVITY_KINDS = ["act_request_created", "act_request_cancelled", "act_assigned", "act_form_printed",
   "act_print_confirmed", "act_form_closed", "act_act_completed", "act_contract_started", "act_contract_request", "act_contract_saved", "act_contract_signed",
   "act_contract_imported", "act_contract_import", "act_contract_approved", "act_contract_returned", "act_tariff_set", "act_tariff_lock",
-  "act_payment", "act_payment_cancelled", "act_payment_import", "act_invoices_generated", "act_invoices_sent", "act_invoice_manual_sent", "act_gps_import", "act_gps_connect", "act_gps_sync", "act_location_confirmed"] as const;
+  "act_payment", "act_payment_cancelled", "act_payment_import", "act_invoices_generated", "act_invoices_sent", "act_invoice_manual_sent", "act_gps_import", "act_gps_connect", "act_gps_sync", "act_gps_token_ok", "act_location_confirmed"] as const;
 
 export const SITUATION_KINDS = ["account_locked", "act_suspect", "request_failed", "location_pending", "import_done", "user_created",
   "user_deactivated", "user_activated", "password_reset", "district_deactivated", "district_activated", "vehicle_deactivated",
   "vehicle_activated", "settings_changed", "staff_pending", "staff_approved", "staff_rejected", "staff_updated", "access_changed",
   "vehicle_created", "vehicle_updated", "customer_created", "customer_updated", "district_radius_changed", "request_overdue", "order_locked", "order_reprint",
-  "request_reassigned", "contract_deleted", "location_mismatch", "location_changed", "mfa_enabled", "mfa_reset", "mfa_backup_used"] as const;
+  "request_reassigned", "contract_deleted", "location_mismatch", "location_changed", "mfa_enabled", "mfa_reset", "mfa_backup_used", "gps_token_dead", "gps_token_down"] as const;
 
 const LEVEL_ICON = {
   info: <InfoIcon color="info" fontSize="small" />, activity: <HistoryIcon color="action" fontSize="small" />, warning: <WarningIcon color="warning" fontSize="small" />,

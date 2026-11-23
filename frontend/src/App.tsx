@@ -91,6 +91,7 @@ export function App() {
         <Route path="/gps" element={<RequireRole roles={["gps"]}><DriverLayout><GpsHome /></DriverLayout></RequireRole>} />
         <Route path="/admin" element={<RequireRole roles={["admin", "manager", "legal", "accountant"]}><DriverLayout wide><AdminHome /></DriverLayout></RequireRole>} />
         <Route path="/admin/gps-callback/:id" element={<RequireRole roles={["admin"]}><DriverLayout wide><GpsCallback /></DriverLayout></RequireRole>} />
+        <Route path="/admin/gps-callback/:id/:slot" element={<RequireRole roles={["admin"]}><DriverLayout wide><GpsCallback /></DriverLayout></RequireRole>} />
         <Route path="/admin/korxona/:id/:view?" element={<RequireRole roles={["admin", "manager", "legal", "accountant"]}><DriverLayout wide><CompanyPage /></DriverLayout></RequireRole>} />
         <Route path="/operator" element={<RequireRole roles={["operator"]}><DriverLayout wide><OperatorHome /></DriverLayout></RequireRole>} />
         <Route path="/change-password" element={<ChangePasswordPage />} />

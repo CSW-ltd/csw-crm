@@ -12,6 +12,7 @@ from app.core import secretbox
 from app.core.config import get_settings
 from app.core.errors import AppError, invalid, not_found
 from app.db.base import utcnow
+from app.gps import tokens
 from app.gps.client import login_url, valid_token
 from app.models import AppSetting, District, Geozone, GeozoneGroup, GpsSource, GpsSyncLog, User, VehicleLink
 from app.services import situation
@@ -71,7 +72,10 @@ async def overview(db: AsyncSession) -> dict:
         out.append({"id": s.id, "system": s.system, "server": s.server, "account": s.account, "district_id": s.district_id,
                     "district": districts.get(s.district_id), "unit_group": s.unit_group, "is_active": s.is_active,
                     "token_status": s.token_status if s.token_enc else "none", "token_user": s.token_user,
-                    "token_set_at": _iso(s.token_set_at), "sync_requested": s.sync_requested_at is not None,
+                    "token_set_at": _iso(s.token_set_at), "backup_account": s.backup_account,
+                    "backup_token_status": tokens.status(s, "backup"), "backup_token_user": s.backup_token_user,
+                    "backup_token_set_at": _iso(s.backup_token_set_at), "active_slot": tokens.active(s),
+                    "token_checked_at": _iso(s.token_checked_at), "alert_state": s.alert_state or "ok", "sync_requested": s.sync_requested_at is not None,
                     "last_sync_at": _iso(s.last_sync_at), "last_error": s.last_error, "zones": zones.get(s.id, 0),
                     "groups": groups.get(s.id, 0), "vehicles_linked": links.get(s.id, 0),
                     "last_stats": json.loads(last.stats) if last and last.stats else None})
@@ -110,6 +114,14 @@ async def update(db: AsyncSession, source_id: int, data: dict) -> GpsSource:
         src.account = data["account"].strip()[:100]
         if src.token_enc:
             src.token_status = "pending"  # token egasi qayta tekshiriladi
+        if src.backup_token_enc and not src.backup_account:
+            src.backup_token_status = "pending"
+    if "backup_account" in data:
+        acc = (data["backup_account"] or "").strip()[:100] or None
+        if acc != src.backup_account:
+            src.backup_account = acc
+            if src.backup_token_enc:
+                src.backup_token_status = "pending"
     if "is_active" in data and data["is_active"] is not None:
         src.is_active = bool(data["is_active"])
     await db.commit()
@@ -124,38 +136,55 @@ def connect_url(src: GpsSource, redirect: str, request_host: str | None) -> str:
         raise invalid("gps_bad_redirect", "Qaytish manzili noto'g'ri")
     if request_host and u.netloc.lower() != request_host.lower():
         raise invalid("gps_bad_redirect", "Qaytish manzili shu sayt bo'lishi kerak")
-    if not u.path.rstrip("/").endswith(f"/gps-callback/{src.id}"):
+    path = u.path.rstrip("/")
+    if not (path.endswith(f"/gps-callback/{src.id}") or path.endswith(f"/gps-callback/{src.id}/backup")):
         raise invalid("gps_bad_redirect", "Qaytish manzili noto'g'ri")
     return login_url(src.server, redirect)
 
 
-async def set_token(db: AsyncSession, actor: User, source_id: int, token: str) -> GpsSource:
+def _slot(slot: str) -> str:
+    if slot not in tokens.SLOTS:
+        raise invalid("gps_bad_slot", "Token turi: main yoki backup")
+    return slot
+
+
+async def set_token(db: AsyncSession, actor: User, source_id: int, token: str, slot: str = "main") -> GpsSource:
+    """Tokenni shifrlab saqlaydi (parol emas — SmartGPS «Ulash» sahifasi bergan faqat o'qish tokeni). Tekshiruv — worker'da."""
     src = await _get(db, source_id)
-    token = (token or "").strip()
+    slot, token = _slot(slot), (token or "").strip()
     if not valid_token(token):
         raise invalid("gps_bad_token", "Token noto'g'ri ko'rinishda")
     if not secretbox.available():
         raise AppError(503, "gps_encryption_off", "GPS_ENC_KEY sozlanmagan — token saqlanmaydi")
-    src.token_enc, src.token_status, src.token_set_at, src.token_user = secretbox.encrypt(token), "pending", utcnow(), None
-    src.sync_requested_at, src.last_error = utcnow(), None
-    situation.activity(db, "act_gps_connect", f"GPS tokeni yangilandi: {src.server} ({src.account})", params={"server": src.server},
-                       actor_id=actor.id, district_id=src.district_id)
+    tokens.set_slot(src, slot, token_enc=secretbox.encrypt(token), status_="pending", user=None, set_at=utcnow())
+    if slot == "main" or tokens.status(src, "main") != "ok":
+        src.sync_requested_at = utcnow()
+    src.last_error = None
+    label = "zaxira tokeni" if slot == "backup" else "tokeni"
+    situation.activity(db, "act_gps_connect", f"GPS {label} yangilandi: {src.server} ({tokens.account(src, slot)})",
+                       params={"server": src.server, "slot": slot}, actor_id=actor.id, district_id=src.district_id)
     await db.commit()
     return src
 
 
-async def clear_token(db: AsyncSession, actor: User, source_id: int) -> GpsSource:
+async def clear_token(db: AsyncSession, actor: User, source_id: int, slot: str = "main") -> GpsSource:
     src = await _get(db, source_id)
-    src.token_enc, src.token_status, src.token_user, src.sync_requested_at = None, "none", None, None
-    situation.activity(db, "act_gps_connect", f"GPS tokeni o'chirildi: {src.server} ({src.account})", params={"server": src.server},
-                       actor_id=actor.id, district_id=src.district_id)
+    slot = _slot(slot)
+    tokens.set_slot(src, slot, token_enc=None, status_="none", user=None)
+    tokens.pick_active(src)
+    if not tokens.has_any(src):
+        src.sync_requested_at = None
+    src.alert_state = tokens.state(src)  # admin o'zi o'chirdi — ogohlantirish emas
+    label = "zaxira tokeni" if slot == "backup" else "tokeni"
+    situation.activity(db, "act_gps_connect", f"GPS {label} o'chirildi: {src.server} ({tokens.account(src, slot)})",
+                       params={"server": src.server, "slot": slot}, actor_id=actor.id, district_id=src.district_id)
     await db.commit()
     return src
 
 
 async def request_sync(db: AsyncSession, source_id: int) -> GpsSource:
     src = await _get(db, source_id)
-    if not src.token_enc:
+    if not tokens.has_any(src):
         raise invalid("gps_not_connected", "Avval SmartGPS'ga ulang")
     src.sync_requested_at = utcnow()
     await db.commit()
