@@ -100,10 +100,19 @@ sudo ufw allow 80,443/tcp
 ```
 
 `admin-allow.conf` bo'lmasa `edge` ishga tushmaydi (Docker uning o'rniga papka yaratadi — `rm -rf admin-allow.conf` va nusxani qayta oling).
-Cheklovni qayta yoqish: `allow <IP>; ... deny all;` → `../dc exec edge nginx -t && ../dc exec edge nginx -s reload`. Cheklovsiz holatda himoya: login so'rov cheklovi (10/daqiqa), 5 xatodan keyin 15 daqiqa blok, kuchli parol; 2FA — reja.
+Cheklovni qayta yoqish: `allow <IP>; ... deny all;` → `../dc exec edge nginx -t && ../dc exec edge nginx -s reload`. Cheklovsiz holatda himoya: login so'rov cheklovi (10/daqiqa), 5 xatodan keyin 15 daqiqa blok, kuchli parol, admin uchun 2FA (pastda).
 
 **Yangi portal ochish** (masalan `call.csw.uz` → operator): `.env`da `PORTAL_HOSTS`, `ROLE_HOSTS`, `CORS_ORIGINS` (va kerak bo'lsa
 `ACTIVE_ROLES`) ga qo'shing → `./certs.sh <email>` (sertifikat kengaytiriladi) → `../deploy.sh $(cat .image-tag)`.
+
+**Admin 2FA (TOTP)** — prod'da har admin uchun majburiy (`APP_ENV=demo` test serverda o'chiq).
+- `.env`da `TOTP_ENC_KEY` bo'lmasa api ishga tushmaydi (yaratish buyrug'i `.env.example`da). Kalit almashtirilsa barcha adminlar 2FA'ni qayta ulaydi.
+- Birinchi kirishda: parol → QR kod (Google/Microsoft Authenticator) → 6 xonali kod → 10 ta zaxira kod (bir marta ko'rsatiladi, «Saqlab oldim»).
+- Keyin har login'da kod so'raladi; telefon yo'q bo'lsa — zaxira kod (har biri bir marta, Vaziyat paneliga yoziladi).
+- Telefon va zaxira kodlar yo'qolsa: boshqa admin «Xodimlar» → «2FA'ni qayta o'rnatish» (sabab majburiy). Kamida 2 ta faol admin bo'lsin
+  (bitta bo'lsa — ogohlantirish; oxirgi adminni faolsizlantirib bo'lmaydi). Oxirgi chora — serverda:
+  `../dc exec api python -m app.reset_2fa <login> "<sabab>"`.
+- `/api/v1/auth/2fa/*` edge'da login bilan bir xil cheklov (10/daqiqa). Shablon o'zgarganda: `../dc restart edge`.
 
 **Boshlang'ich ma'lumot** (viloyat, tuman, xodimlar) — haqiqiy fayl faqat serverda:
 

@@ -135,8 +135,9 @@ async def test_socket_rejects_other_portal(world, portals, monkeypatch):
 
 
 def test_production_requires_role_hosts():
+    from cryptography.fernet import Fernet
     base = dict(app_env="production", jwt_secret="x" * 40, cookie_secure=True,
-                database_url="mysql+aiomysql://u:p@h/db")
+                database_url="mysql+aiomysql://u:p@h/db", totp_enc_key=Fernet.generate_key().decode())
     with pytest.raises(RuntimeError, match="ROLE_HOSTS"):
         Settings(**base, role_hosts="").check_production()
     Settings(**base, role_hosts=json.dumps(HOSTS)).check_production()

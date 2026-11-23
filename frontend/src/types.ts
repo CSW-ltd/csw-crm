@@ -21,6 +21,8 @@ export interface User {
 
 export interface AdminUser extends User {
   is_active: boolean;
+  /** Admin 2FA (TOTP) ulangan */
+  totp_enabled?: boolean;
   locked_until: string | null;
   created_at: string;
   district_ids: number[];

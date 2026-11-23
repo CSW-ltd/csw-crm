@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, ListItemText, MenuItem, Paper, Stack, Table, TableBody,
-  TableCell, TableContainer, TableHead, TableRow, TextField } from "@mui/material";
+import { Alert, Button, Checkbox, Chip, Dialog, DialogActions, DialogContent, DialogTitle, ListItemText, MenuItem, Paper, Stack, Table, TableBody,
+  TableCell, TableContainer, TableHead, TableRow, TextField, Typography } from "@mui/material";
 import { adminApi } from "@/api/endpoints";
 import { errorCode, errorMessage } from "@/api/client";
 import { PasswordField } from "@/components/PasswordField";
@@ -8,7 +8,7 @@ import { useCan } from "@/hooks/useCan";
 import { useI18n } from "@/i18n/I18nContext";
 import type { MessageKey } from "@/i18n/messages";
 import { confirmDialog, toast } from "@/lib/alerts";
-import { isRoleActive } from "@/lib/session";
+import { isAdmin2fa, isRoleActive } from "@/lib/session";
 import { useAppSelector } from "@/store";
 import type { AdminUser, Role } from "@/types";
 import { AccessDialog } from "./AccessDialog";
@@ -36,6 +36,7 @@ export function UsersTab({ districts }: RefData) {
   const [form, setForm] = useState<Form | null>(null);
   const [reset, setReset] = useState<{ user: AdminUser; password: string } | null>(null);
   const [accessFor, setAccessFor] = useState<AdminUser | null>(null);
+  const [mfaReset, setMfaReset] = useState<{ user: AdminUser; reason: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const roleLabel = (r: Role) => t(`r_${r}` as MessageKey);
   const dName = (id: number) => districts.find((d) => d.id === id)?.name ?? `#${id}`;
@@ -79,8 +80,11 @@ export function UsersTab({ districts }: RefData) {
     (form.id || (/^[a-z0-9_.]{3,50}$/.test(form.username.trim().toLowerCase()) && form.password.length >= 8));
   const activeDistricts = districts.filter((d) => d.is_active);
 
+  const activeAdmins = users.filter((u) => u.role === "admin" && u.is_active).length;
+
   return (
     <Paper variant="outlined" sx={{ p: 2 }}>
+      {isAdmin && users.length > 0 && activeAdmins === 1 && <Alert severity="warning" sx={{ mb: 2 }} id="single-admin-warning">{t("single_admin_warning")}</Alert>}
       <Stack direction={{ xs: "column", md: "row" }} spacing={1.5} sx={{ mb: 2 }}>
         <TextField id="user-search" size="small" label={t("search")} value={q} onChange={(e) => setQ(e.target.value)} sx={{ flex: 1 }} />
         <TextField id="user-role" size="small" select label={t("role")} value={role} onChange={(e) => setRole(e.target.value as Role | "")} sx={{ minWidth: 190 }}>
@@ -117,6 +121,8 @@ export function UsersTab({ districts }: RefData) {
                       : <Chip size="small" color={u.is_active ? "success" : "default"} label={t(u.is_active ? "active" : "inactive")} />}
                     {u.locked_until && new Date(u.locked_until + "Z") > new Date() && <Chip size="small" color="error" label={t("locked")} />}
                     {u.must_change_password && u.approval_status === "approved" && <Chip size="small" color="warning" variant="outlined" label={t("temp_password_pending")} />}
+                    {u.role === "admin" && (u.totp_enabled ? <Chip size="small" color="success" variant="outlined" label={t("mfa_on")} />
+                      : isAdmin2fa() && <Chip size="small" color="warning" variant="outlined" label={t("mfa_off")} />)}
                   </Stack>
                 </TableCell>
                 <TableCell align="right" sx={{ whiteSpace: "nowrap" }}>
@@ -128,6 +134,8 @@ export function UsersTab({ districts }: RefData) {
                     role: u.role, district_id: u.district_id ?? "", district_ids: MULTI.includes(u.role) ? u.district_ids : [], password: "" })}>{t("edit")}</Button>}
                   {can("staff.view") && u.role !== "admin" && u.id !== me?.id && <Button size="small" onClick={() => setAccessFor(u)}>{t("access")}</Button>}
                   {can("staff.reset_password") && u.approval_status === "approved" && <Button size="small" onClick={() => setReset({ user: u, password: "" })}>{t("reset_password")}</Button>}
+                  {isAdmin && u.role === "admin" && u.totp_enabled && u.id !== me?.id &&
+                    <Button size="small" color="warning" onClick={() => setMfaReset({ user: u, reason: "" })}>{t("mfa_reset_btn")}</Button>}
                   {can("staff.deactivate") && u.id !== me?.id && u.approval_status === "approved" &&
                     <Button size="small" color={u.is_active ? "error" : "success"} disabled={busy} onClick={() => toggle(u)}>{t(u.is_active ? "deactivate" : "activate")}</Button>}
                 </TableCell>
@@ -180,6 +188,21 @@ export function UsersTab({ districts }: RefData) {
           <Button onClick={() => setReset(null)}>{t("cancel")}</Button>
           <Button variant="contained" disabled={busy || (reset?.password.length ?? 0) < 8}
             onClick={async () => { if (reset && await run(() => adminApi.resetPassword(reset.user.id, reset.password), t("saved"))) setReset(null); }}>{t("save")}</Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog open={!!mfaReset} onClose={() => setMfaReset(null)} fullWidth maxWidth="xs">
+        <DialogTitle>{t("mfa_reset_title", { name: mfaReset?.user.full_name ?? "" })}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{t("mfa_reset_hint")}</Typography>
+          <TextField id="mfa-reset-reason" fullWidth autoFocus label={t("mfa_reset_reason")} value={mfaReset?.reason ?? ""}
+            onChange={(e) => mfaReset && setMfaReset({ ...mfaReset, reason: e.target.value })} inputProps={{ maxLength: 300 }} />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setMfaReset(null)}>{t("cancel")}</Button>
+          <Button variant="contained" color="warning" disabled={busy || (mfaReset?.reason.trim().length ?? 0) < 3}
+            onClick={async () => { if (mfaReset && await run(() => adminApi.reset2fa(mfaReset.user.id, mfaReset.reason.trim()), t("saved"))) setMfaReset(null); }}>
+            {t("mfa_reset_btn")}</Button>
         </DialogActions>
       </Dialog>
 

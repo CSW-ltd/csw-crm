@@ -9,8 +9,8 @@ from app.core.portals import check_portal, normalize_host, portal_roles
 from app.core.security import ACCESS, REFRESH, create_token, decode_token
 from app.models import User
 from app.repositories import users as users_repo
-from app.schemas import ChangePasswordIn, LoginIn, LoginOut, MeOut, RefreshIn
-from app.services import auth_service
+from app.schemas import ChangePasswordIn, LoginIn, LoginOut, MeOut, MfaCodeIn, MfaEnableOut, MfaSetupOut, MfaTokenIn, RefreshIn
+from app.services import auth_service, mfa_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 REFRESH_PATH = "/api/v1/auth"
@@ -54,12 +54,32 @@ async def auth_config(request: Request) -> dict:
         accounts = [a for a in accounts if a["role"] in roles]
     portal = None if roles is None else {"host": normalize_host(request.headers.get("host")), "roles": sorted(roles)}
     return {"tab_sessions": s.tab_sessions, "demo": demo, "active_roles": s.active_role_list,
-            "demo_accounts": accounts, "portal": portal}
+            "demo_accounts": accounts, "portal": portal, "admin_2fa": s.admin_2fa_on}
 
 
 @router.post("/login", response_model=LoginOut)
 async def login(body: LoginIn, request: Request, response: Response, db: AsyncSession = DB):
     user = await auth_service.login(db, body.username, body.password, request.headers.get("host"))
+    if auth_service.mfa_required(user):
+        raise mfa_service.challenge(user)
+    return _issue(request, response, user)
+
+
+@router.post("/2fa/setup", response_model=MfaSetupOut)
+async def mfa_setup(body: MfaTokenIn, request: Request, db: AsyncSession = DB):
+    return await mfa_service.setup(db, body.mfa_token, request.headers.get("host"))
+
+
+@router.post("/2fa/enable", response_model=MfaEnableOut)
+async def mfa_enable(body: MfaCodeIn, request: Request, response: Response, db: AsyncSession = DB):
+    user, codes = await mfa_service.enable(db, body.mfa_token, body.code, request.headers.get("host"))
+    out = _issue(request, response, user)
+    return MfaEnableOut(**out.model_dump(), backup_codes=codes)
+
+
+@router.post("/2fa/verify", response_model=LoginOut)
+async def mfa_verify(body: MfaCodeIn, request: Request, response: Response, db: AsyncSession = DB):
+    user = await mfa_service.verify(db, body.mfa_token, body.code, request.headers.get("host"))
     return _issue(request, response, user)
 
 
@@ -69,6 +89,9 @@ async def refresh(request: Request, response: Response, body: RefreshIn | None =
     data = decode_token(token, REFRESH) if token else None
     user = await users_repo.by_id(db, int(data["sub"])) if data else None
     if not user or not user.is_active or not get_settings().role_active(user.role.value):
+        raise AppError(401, "not_authenticated", "Sessiya tugadi, qayta kiring")
+    # 2FA ulanmagan (yoki qayta o'rnatilgan) admin sessiyani uzaytira olmaydi — qayta kirib 2FA'ni ulaydi
+    if auth_service.mfa_required(user) and not user.totp_enabled:
         raise AppError(401, "not_authenticated", "Sessiya tugadi, qayta kiring")
     check_portal(request.headers.get("host"), user.role.value)
     return _issue(request, response, user)

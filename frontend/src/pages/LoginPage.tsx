@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Alert, Box, Button, Chip, Stack, TextField, Typography } from "@mui/material";
 import { Navigate } from "react-router-dom";
 import { AuthShell } from "@/components/AuthShell";
+import { MfaStep } from "@/components/MfaStep";
 import { PasswordField } from "@/components/PasswordField";
 import { useOnline } from "@/hooks/useOnline";
 import { useI18n } from "@/i18n/I18nContext";
@@ -17,7 +18,7 @@ export function LoginPage() {
   const { t, tErr } = useI18n();
   const dispatch = useAppDispatch();
   const online = useOnline();
-  const { user, error, errorHome } = useAppSelector((s) => s.auth);
+  const { user, error, errorHome, mfa } = useAppSelector((s) => s.auth);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -25,6 +26,7 @@ export function LoginPage() {
   const [touched, setTouched] = useState(false);
 
   if (user) return <Navigate to={afterLoginPath(user, lastPath())} replace />;
+  if (mfa) return <AuthShell steps={[t("auth_step_1"), t("auth_step_2"), t("auth_step_3")]}><MfaStep challenge={mfa} /></AuthShell>;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();

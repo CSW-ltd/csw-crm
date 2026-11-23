@@ -40,6 +40,29 @@ class LoginOut(MeOut):
     refresh_token: str | None = None
 
 
+class MfaTokenIn(BaseModel):
+    mfa_token: str = Field(min_length=1, max_length=1000)
+
+
+class MfaCodeIn(MfaTokenIn):
+    code: str = Field(min_length=1, max_length=20)
+
+
+class MfaSetupOut(BaseModel):
+    secret: str
+    uri: str
+    qr_svg: str
+
+
+class MfaEnableOut(LoginOut):
+    """2FA ulandi: sessiya ochildi, zaxira kodlar BIR MARTA ko'rsatiladi."""
+    backup_codes: list[str]
+
+
+class MfaResetIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=300)
+
+
 class RefreshIn(BaseModel):
     refresh_token: str | None = None
 
@@ -55,6 +78,7 @@ USERNAME_PATTERN = r"^[a-z0-9_.]{3,50}$"
 
 class AdminUserOut(UserOut):
     is_active: bool
+    totp_enabled: bool = False
     locked_until: datetime | None
     created_at: datetime
     district_ids: list[int] = []

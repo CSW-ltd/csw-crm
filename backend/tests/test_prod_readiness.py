@@ -81,11 +81,13 @@ def test_production_rejects_defaults():
         Settings(app_env="production", jwt_secret="dev-only-secret-change-me", cookie_secure=False,
                  database_url="sqlite+aiosqlite:///x.db", active_roles="admin,boss").check_production()
     msg = str(e.value)
-    assert "JWT_SECRET" in msg and "COOKIE_SECURE" in msg and "SQLite" in msg and "boss" in msg
+    assert "JWT_SECRET" in msg and "COOKIE_SECURE" in msg and "SQLite" in msg and "boss" in msg and "TOTP_ENC_KEY" in msg
 
 
 def test_production_accepts_good_settings():
+    from cryptography.fernet import Fernet
     Settings(app_env="production", jwt_secret="x" * 40, cookie_secure=True, tab_sessions=False,
+             totp_enc_key=Fernet.generate_key().decode(),
              database_url="mysql+aiomysql://u:p@db/csw", active_roles="admin,manager,legal,accountant",
              role_hosts='{"admin.csw.uz": ["admin"], "legal.csw.uz": ["legal"]}').check_production()
 

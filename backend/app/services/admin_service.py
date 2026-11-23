@@ -128,6 +128,11 @@ async def create_user(db: AsyncSession, actor: User, body: UserCreateIn) -> User
     return await users_repo.by_id(db, user.id)
 
 
+async def _other_active_admins(db: AsyncSession, user_id: int) -> int:
+    return len((await db.execute(select(User.id).where(
+        User.role == Role.admin, User.is_active.is_(True), User.id != user_id))).all())
+
+
 async def _target(db: AsyncSession, actor: User, user_id: int) -> User:
     user = await users_repo.by_id(db, user_id)
     if not user:
@@ -155,6 +160,9 @@ async def update_user(db: AsyncSession, actor: User, user_id: int, body: UserUpd
         district_id, district_ids = await _resolve_districts(
             db, actor, role, data.get("district_id", user.district_id),
             data["district_ids"] if data.get("district_ids") is not None else [d for d in user.district_ids if d != user.district_id])
+    if user.role == Role.admin and user.is_active and (data.get("is_active") is False or role != Role.admin):
+        if not await _other_active_admins(db, user.id):
+            raise conflict("last_admin", "Oxirgi faol adminni faolsizlantirib yoki rolini o'zgartirib bo'lmaydi")
     if user.role == Role.driver and (data.get("is_active") is False or district_changed):
         if await shift_repo.open_for_driver(db, user.id):
             raise conflict("driver_has_open_shift", "Haydovchida ochiq smena bor — avval smenani yoping")

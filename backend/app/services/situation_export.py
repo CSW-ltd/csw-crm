@@ -27,6 +27,7 @@ KIND_UZ = {
     "act_location_confirmed": "Shartnomadagi koordinata tasdiqlandi", "location_mismatch": "Koordinata mos kelmadi", "location_changed": "GPS joylashuvni o'zgartirdi",
     "request_overdue": "Muddati o'tgan murojaatlar", "act_suspect": "Shubhali dalolatnoma", "order_locked": "Varaqa bloklandi",
     "order_reprint": "Qayta chop etishga ruxsat", "customer_updated": "Korxona o'zgartirildi", "customer_created": "Korxona qo'shildi",
+    "mfa_enabled": "2FA ulandi", "mfa_reset": "2FA qayta o'rnatildi", "mfa_backup_used": "Zaxira kod bilan kirildi",
 }
 
 

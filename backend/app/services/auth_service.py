@@ -8,9 +8,34 @@ from app.core.portals import check_portal
 from app.core.security import hash_password, verify_password
 from app.db.base import utcnow
 from app.models import User
-from app.models.enums import SituationLevel
+from app.models.enums import Role, SituationLevel
 from app.repositories import users as users_repo
 from app.services import situation
+
+
+def mfa_required(user: User) -> bool:
+    return user.role == Role.admin and get_settings().admin_2fa_on
+
+
+def check_not_locked(user: User) -> None:
+    if user.locked_until and user.locked_until > utcnow():
+        m = get_settings().login_lock_minutes
+        raise AppError(423, "account_locked", f"Juda ko'p xato urinish. {m} daqiqadan keyin qayta urinib ko'ring")
+
+
+async def register_failure(db: AsyncSession, user: User) -> None:
+    """Noto'g'ri parol yoki 2FA kodi — umumiy hisoblagich: login_max_attempts xatodan keyin blok (commit qiladi)."""
+    s = get_settings()
+    user.failed_logins += 1
+    if user.failed_logins >= s.login_max_attempts:
+        user.locked_until = utcnow() + timedelta(minutes=s.login_lock_minutes)
+        user.failed_logins = 0
+        situation.add(db, SituationLevel.warning, "account_locked",
+                      f"«{user.username}» akkaunti {s.login_lock_minutes} daqiqaga bloklandi: "
+                      f"{s.login_max_attempts} marta noto'g'ri parol yoki kod kiritildi",
+                      params={"username": user.username, "minutes": s.login_lock_minutes, "attempts": s.login_max_attempts},
+                      district_id=user.district_id, ref=("user", user.id))
+    await situation.commit(db)
 
 
 async def login(db: AsyncSession, username: str, password: str, host: str | None = None) -> User:
@@ -21,22 +46,14 @@ async def login(db: AsyncSession, username: str, password: str, host: str | None
         raise AppError(403, "account_pending", "Hisobingiz admin tasdig'ini kutmoqda")
     if not user or not user.is_active:
         raise bad
-    now = utcnow()
-    if user.locked_until and user.locked_until > now:
-        raise AppError(423, "account_locked", f"Juda ko'p xato urinish. {s.login_lock_minutes} daqiqadan keyin qayta urinib ko'ring")
+    check_not_locked(user)
     if not verify_password(password, user.password_hash):
-        user.failed_logins += 1
-        if user.failed_logins >= s.login_max_attempts:
-            user.locked_until = now + timedelta(minutes=s.login_lock_minutes)
-            user.failed_logins = 0
-            situation.add(db, SituationLevel.warning, "account_locked",
-                          f"«{user.username}» akkaunti {s.login_lock_minutes} daqiqaga bloklandi: "
-                          f"{s.login_max_attempts} marta noto'g'ri parol kiritildi",
-                          params={"username": user.username, "minutes": s.login_lock_minutes, "attempts": s.login_max_attempts},
-                          district_id=user.district_id, ref=("user", user.id))
-        await situation.commit(db)
+        await register_failure(db, user)
         raise bad
-    user.failed_logins = 0
+    if not mfa_required(user):
+        # 2FA'li adminda hisoblagich faqat kod to'g'ri bo'lganda tozalanadi — aks holda parol qayta kiritilib,
+        # kodni cheksiz tanlash mumkin bo'lardi
+        user.failed_logins = 0
     user.locked_until = None
     await db.commit()
     if not s.role_active(user.role.value):

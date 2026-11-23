@@ -8,6 +8,7 @@ const KEY = "csw:tab-tokens";
 let tabMode = false;
 let demo = false;
 let activeRoles: string[] | null = null;
+let admin2fa = false;
 export interface DemoAccount { username: string; role: string }
 /** Joriy portal (subdomen, ROLE_HOSTS). null — cheklov yo'q (lokal); roles bo'sh — noma'lum manzil. */
 export interface Portal { host: string; roles: string[] }
@@ -19,11 +20,13 @@ export interface Tokens { access_token: string; refresh_token: string }
 export async function detectSessionMode(): Promise<void> {
   try {
     const r = await fetch("/api/v1/auth/config", { credentials: "include" });
-    if (r.ok) { const c = await r.json(); tabMode = !!c.tab_sessions; demo = !!c.demo; activeRoles = c.active_roles ?? null; demoAccounts = c.demo_accounts ?? []; portal = c.portal ?? null; }
+    if (r.ok) { const c = await r.json(); tabMode = !!c.tab_sessions; demo = !!c.demo; activeRoles = c.active_roles ?? null; demoAccounts = c.demo_accounts ?? []; portal = c.portal ?? null; admin2fa = !!c.admin_2fa; }
   } catch { tabMode = false; }
 }
 
 export const isTabMode = () => tabMode;
+/** Admin 2FA (TOTP) majburiy (prod). Demo/lokalda o'chiq. */
+export const isAdmin2fa = () => admin2fa;
 /** Demo server: login sahifasida demo hisoblar ko'rsatiladi. */
 export const isDemo = () => demo;
 /** Demo hisoblar (login va rol, parolsiz) — backend DEMO_CREDENTIALS'dagi loginlar. */

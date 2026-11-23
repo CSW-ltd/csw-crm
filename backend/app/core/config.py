@@ -56,6 +56,11 @@ class Settings(BaseSettings):
     # Demo loginlari (APP_ENV=demo va lokal seed): JSON {"csw.admin": "parol", ...} — app/core/demo.py
     demo_credentials: str = ""  # CI rasmga commit SHA yozadi (/api/v1/health'da ko'rinadi)
 
+    # Admin 2FA (TOTP). Bo'sh — production'da yoqiq, boshqa muhitlarda (demo, lokal, testlar) o'chiq.
+    admin_2fa: bool | None = None
+    # TOTP kalitlarini bazada shifrlash (Fernet). Prod'da majburiy; lokalda bo'sh bo'lsa JWT_SECRET'dan olinadi.
+    totp_enc_key: str = ""
+
     @property
     def cors_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
@@ -64,6 +69,10 @@ class Settings(BaseSettings):
         if role == "admin" or not self.active_roles.strip():
             return True
         return role in {r.strip() for r in self.active_roles.split(",") if r.strip()}
+
+    @property
+    def admin_2fa_on(self) -> bool:
+        return self.admin_2fa if self.admin_2fa is not None else self.app_env == "production"
 
     @property
     def active_role_list(self) -> list[str] | None:
@@ -103,6 +112,12 @@ class Settings(BaseSettings):
         unknown = {r.strip() for r in self.active_roles.split(",") if r.strip()} - {r.value for r in Role}
         if unknown:
             problems.append(f"ACTIVE_ROLES'da noma'lum rol: {', '.join(sorted(unknown))}")
+        if self.admin_2fa_on:
+            from app.core.totp import TotpKeyError, check_key
+            try:
+                check_key(self.totp_enc_key)
+            except TotpKeyError as e:
+                problems.append(str(e))
         if portals is None:
             problems.append("ROLE_HOSTS bo'sh — prod'da har rol o'z subdomenida bo'lishi kerak")
         if problems:

@@ -83,6 +83,12 @@ server {
         proxy_pass http://web:80;
         include /etc/nginx/templates/_proxy.inc;
     }
+    # Admin 2FA kodi (setup/enable/verify) — login bilan bir xil cheklov
+    location ^~ /api/v1/auth/2fa/ {
+        limit_req zone=login burst=10 nodelay;
+        proxy_pass http://web:80;
+        include /etc/nginx/templates/_proxy.inc;
+    }
 }
 
 # --- Rol portallari (manager, legal, account, ...): rol tekshiruvi backend'da (ROLE_HOSTS) ---

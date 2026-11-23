@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "e304b2222bdb617c37fddf13f63674eeafea422405b9dd67899ea48f77a6167f"
+            "sha256": "65141e4d6e600b0a2c257ed87780901ea82ae3c850e889af1101299227c4a386"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -1487,6 +1487,15 @@
             "markers": "python_version >= '3.7'",
             "version": "==1.1.1"
         },
+        "pyotp": {
+            "hashes": [
+                "sha256:346b6642e0dbdde3b4ff5a930b664ca82abfa116356ed48cc42c7d6590d36f63",
+                "sha256:81c2e5865b8ac55e825b0358e496e1d9387c811e85bb40e71a3b29b288963612"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.7'",
+            "version": "==2.9.0"
+        },
         "pypdfium2": {
             "hashes": [
                 "sha256:016305ec87e4a1f0bc0c9e8784e18abbd02db65b03eed9aa38d7e678837544b5",
@@ -1647,6 +1656,15 @@
             "index": "pypi",
             "markers": "python_version >= '3.7' and python_version < '4'",
             "version": "==4.2.5"
+        },
+        "segno": {
+            "hashes": [
+                "sha256:e90c6ff82c633f757a96d4b1fb06cc932589b5237f33be653f52252544ac64df",
+                "sha256:f23da78b059251c36e210d0cf5bfb1a9ec1604ae6e9f3d42f9a7c16d306d847e"
+            ],
+            "index": "pypi",
+            "markers": "python_version >= '3.5'",
+            "version": "==1.6.1"
         },
         "simple-websocket": {
             "hashes": [

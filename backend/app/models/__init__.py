@@ -92,6 +92,10 @@ class User(TimestampMixin, Base):
     # Manager yaratgan xodim admin tasdiqlamaguncha "pending" (kira olmaydi)
     approval_status: Mapped[str] = mapped_column(String(10), default="approved", server_default="approved")
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    # Admin 2FA (TOTP): kalit Fernet bilan shifrlangan; totp_last_step — oxirgi qabul qilingan kod (qayta ishlatilmaydi)
+    totp_secret_enc: Mapped[str | None] = mapped_column(String(255))
+    totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False, server_default=sa_false())
+    totp_last_step: Mapped[int | None] = mapped_column(Integer)
     district: Mapped[District | None] = relationship()
     # Xodimlar soni kichik (~20) — ruxsat va doira har doim birga yuklanadi
     perm_rows: Mapped[list[UserPermission]] = relationship(lazy="selectin", cascade="all, delete-orphan",
@@ -113,6 +117,15 @@ class User(TimestampMixin, Base):
 
     def can(self, code: str) -> bool:
         return self.role == Role.admin or any(p.code == code for p in self.perm_rows)
+
+
+class UserBackupCode(Base):
+    """Admin 2FA zaxira kodlari (bir martalik, HMAC xeshi). Qayta ulashda eskilari o'chiriladi."""
+    __tablename__ = "user_backup_codes"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    code_hash: Mapped[str] = mapped_column(String(64))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime)
 
 
 class Vehicle(Base):
@@ -697,7 +710,7 @@ class SituationRead(Base):
 __all__ = [
     "Base", "Region", "Provider", "District", "User", "Vehicle", "Shift", "Customer", "CustomerContact", "ImportBatch", "Contract",
     "ContractEvent", "Tariff", "Request", "NaryadCounter", "Act", "ActFile", "RequestEvent", "AppSetting", "SituationEvent", "SituationRead",
-    "UserDistrict", "UserPermission", "Appeal", "RequestSeen", "WorkSchedule", "VehiclePosition", "OrderForm", "Payment", "Invoice", "InvoiceLine",
+    "UserDistrict", "UserPermission", "UserBackupCode", "Appeal", "RequestSeen", "WorkSchedule", "VehiclePosition", "OrderForm", "Payment", "Invoice", "InvoiceLine",
 ]
 
 

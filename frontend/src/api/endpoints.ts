@@ -33,6 +33,20 @@ export const authApi = {
     const { access_token: _a, refresh_token: _r, ...user } = r.data;
     return user as User;
   }),
+  /** Admin 2FA: login `mfa_required` xatosi (details.mode, details.mfa_token) dan keyin */
+  mfaSetup: (mfa_token: string) =>
+    api.post<{ secret: string; uri: string; qr_svg: string }>("/auth/2fa/setup", { mfa_token }).then((r) => r.data),
+  mfaEnable: (mfa_token: string, code: string) =>
+    api.post<User & Partial<Tokens> & { backup_codes: string[] }>("/auth/2fa/enable", { mfa_token, code }).then((r) => {
+      saveTokens(r.data);
+      const { access_token: _a, refresh_token: _r, backup_codes, ...user } = r.data;
+      return { user: user as User, backup_codes };
+    }),
+  mfaVerify: (mfa_token: string, code: string) => api.post<User & Partial<Tokens>>("/auth/2fa/verify", { mfa_token, code }).then((r) => {
+    saveTokens(r.data);
+    const { access_token: _a, refresh_token: _r, ...user } = r.data;
+    return user as User;
+  }),
   me: () => api.get<User>("/auth/me").then((r) => r.data),
   logout: () => api.post("/auth/logout").finally(() => { clearTokens(); closeSocket(); }),
   changePassword: (current_password: string, new_password: string) =>
@@ -49,6 +63,7 @@ export const adminApi = {
   createUser: (body: UserCreate) => api.post<AdminUser>("/admin/users", body).then((r) => r.data),
   updateUser: (id: number, body: UserPatch) => api.patch<AdminUser>(`/admin/users/${id}`, body).then((r) => r.data),
   resetPassword: (id: number, password: string) => api.post<AdminUser>(`/admin/users/${id}/reset-password`, { password }).then((r) => r.data),
+  reset2fa: (id: number, reason: string) => api.post<AdminUser>(`/admin/users/${id}/reset-2fa`, { reason }).then((r) => r.data),
   regions: () => api.get<Region[]>("/admin/regions").then((r) => r.data),
   districts: () => api.get<District[]>("/admin/districts").then((r) => r.data),
   createDistrict: (name: string, region_id: number) => api.post<District>("/admin/districts", { name, region_id }).then((r) => r.data),

@@ -19,6 +19,7 @@ from app.repositories import catalog
 from app.repositories import customers as customers_repo
 from app.repositories import settings as settings_repo
 from app.schemas import (
+    MfaResetIn,
     AdminUserOut,
     AccessIn,
     AccessOut,
@@ -39,7 +40,7 @@ from app.schemas import (
     VehicleIn,
     VehicleUpdateIn,
 )
-from app.services import admin_service, customer_import
+from app.services import admin_service, customer_import, mfa_service
 from app.services.table_readers import file_kind
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -72,6 +73,12 @@ async def update_user(user_id: int, body: UserUpdateIn, user: User = perm("staff
 @router.post("/users/{user_id}/reset-password", response_model=AdminUserOut)
 async def reset_password(user_id: int, body: PasswordResetIn, user: User = perm("staff.reset_password"), db: AsyncSession = DB):
     return await admin_service.reset_password(db, user, user_id, body.password)
+
+
+@router.post("/users/{user_id}/reset-2fa", response_model=AdminUserOut)
+async def reset_2fa(user_id: int, body: MfaResetIn, admin: User = AdminOnly, db: AsyncSession = DB):
+    """Boshqa adminning 2FA'si (telefon yo'qolsa): keyingi kirishda QR qaytadan. Sabab Vaziyat paneliga yoziladi."""
+    return await mfa_service.reset(db, admin, user_id, body.reason)
 
 
 @router.post("/users/{user_id}/approve", response_model=AdminUserOut)
