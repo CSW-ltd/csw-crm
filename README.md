@@ -101,7 +101,7 @@ API'ni Postman bilan sinash: `Authorization: Bearer <token>` sarlavhasi bilan CS
 - Filiallar: `dev` (kundalik ish, `*.test.csw.uz`) → `prod` (rol portallari `*.csw.uz`) → `master` (oxirgi barqaror versiya).
 - Reliz: `dev`ga push → GitHub Actions rasmlarni GHCR'ga chiqaradi → serverda `deploy/deploy.sh <sha>` (avval test, keyin prod).
 - `GET /api/v1/health` — ilova + baza holati va versiya (SHA).
-- `ACTIVE_ROLES` — faol rollar (1-bosqich: admin, manager, legal, accountant); `python -m app.bootstrap <yaml>` — boshlang'ich xodimlar.
+- `ACTIVE_ROLES` — faol rollar (1-bosqich: admin, manager, legal, accountant, gps — `dispatch.*`); `python -m app.bootstrap <yaml>` — boshlang'ich xodimlar.
 - Planshetda GPS va kamera faqat **HTTPS** orqali ishlaydi.
 
 ## Huquqlar (PR #7)

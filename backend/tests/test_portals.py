@@ -12,7 +12,7 @@ HOSTS = {
     "admin.csw.uz": ["admin"],
     "manager.csw.uz": ["manager"],
     "legal.csw.uz": ["legal"],
-    "gps.csw.uz": ["gps"],
+    "dispatch.csw.uz": ["gps"],
 }
 
 

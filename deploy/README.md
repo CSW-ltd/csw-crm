@@ -115,7 +115,7 @@ cp ../bootstrap.example.yaml bootstrap.yaml && chmod 600 bootstrap.yaml   # tahr
 Vaqtinchalik parollar terminalga **bir marta** chiqadi — xodimlarga xavfsiz kanal orqali bering; birinchi kirishda almashtiriladi.
 Qayta ishga tushirish mavjud loginlarni o'zgartirmaydi (yangi xodim qo'shish uchun faylga qo'shib, yana ishga tushiring).
 
-`ACTIVE_ROLES=admin,manager,legal,accountant` (1-bosqich): boshqa rollar kira olmaydi (`role_inactive`), ular uchun xodim yaratilmaydi.
+`ACTIVE_ROLES=admin,manager,legal,accountant,gps` (1-bosqich; `gps` — GPS xodimi, portali `dispatch.csw.uz`): boshqa rollar kira olmaydi (`role_inactive`), ular uchun xodim yaratilmaydi.
 Rolni ochish: `.env`ga qo'shing → `../deploy.sh $(cat .image-tag)`.
 
 ## 3. csw-test
